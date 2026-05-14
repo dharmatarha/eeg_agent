@@ -1,0 +1,71 @@
+# EEG-ADK Multi-Agent System: Agent Roles and Orchestration
+
+This document outlines the architecture, roles, and interactions of the autonomous agents within the EEG-ADK Multi-Agent System.
+
+The system is built on a **State-Graph orchestration framework** (powered by LangGraph) combined with Google ADK methodology. This ensures memory-safe operations, recursive debugging, and verifiable quality assurance for complex MNE-Python workflows.
+
+## 1. Core Agents
+
+The system delegates specialized tasks to three primary agents, each configured with highly specific system prompts and tools.
+
+### 🧠 Lead Planner (Strategist)
+- **Role:** Neuroinformatics & Workflow Design
+- **Source File:** `src/agents/planner.py`
+- **Core Function:** Translates vague user descriptions (e.g., "clean the N400 data") into concrete, technical MNE-Python analysis plans.
+- **Key Behaviors:** 
+  - Scans raw data file headers using the `metadata_extractor` tool to understand channels, sampling frequency, and triggers without fully loading the data into memory.
+  - Queries the offline Vector Database (`scientific_rag`) to automatically populate missing standard parameters (like standard filter cutoffs).
+  - Outputs a structured Analysis Plan that is presented to the user for Human-in-the-Loop (HITL) approval before any code executes.
+
+### 💻 Executor (Programmer)
+- **Role:** Code Generation & Execution
+- **Source File:** `src/agents/executor.py`
+- **Core Function:** Writes and runs MNE-Python scripts to fulfill the Analysis Plan.
+- **Key Behaviors:**
+  - Operates safely inside a **Stateful Jupyter Sandbox** via the `stateful_jupyter_exec` WebSocket tool. Data loaded in previous turns is retained in memory.
+  - Adheres strictly to memory-safe constraints (`preload=False` and `MNE_MEMMAP_MIN_SIZE='10M'`) to prevent Out-Of-Memory (OOM) crashes on local hardware.
+  - Recursively debugs and self-corrects: If an execution returns an error traceback, it analyzes the error and rewrites the logic autonomously.
+
+### 👁️ Critic (Reviewer & QA)
+- **Role:** Quality Assurance & Reporting
+- **Source File:** `src/agents/critic.py`
+- **Core Function:** Acts as a Vision-Language Model (VLM) reviewer that validates the Executor's outputs.
+- **Key Behaviors:**
+  - Reads execution logs and visually inspects generated Base64 plots (e.g., ERPs, Topomaps) for Signal-to-Noise Ratio (SNR) and anomalies (like persistent eye-blinks).
+  - Returns `REJECT` alongside feedback if artifacts remain, demanding the Executor rerun the pipeline with tightened thresholds.
+  - Returns `APPROVE` when acceptable, synthesizing a final, manuscript-ready Methods & Results section based exactly on the executed script.
+
+---
+
+## 2. Agent Tools
+
+The agents interact with the environment and external knowledge bases using three specialized tools:
+
+1. **`metadata_extractor` (`src/tools/metadata_extractor.py`)**: A fast microservice that peeks into EEG file headers (like `.fif` or `.set`) to extract critical dimensions without loading large binary arrays.
+2. **`scientific_rag` (`src/tools/rag_search.py`)**: An offline RAG system powered by ChromaDB. It searches dual collections: scientific neuroimaging methods (for parameters) and the MNE-Python API documentation (for syntax).
+3. **`stateful_jupyter_exec` (`src/tools/jupyter_exec.py`)**: A WebSocket client that sends code strings to a persistent Dockerized Jupyter Kernel gateway, allowing sequential analysis steps while capturing text outputs, error tracebacks, and Base64 encoded plots.
+
+---
+
+## 3. Orchestration & State Graph
+
+The interaction between the agents is strictly governed by a LangGraph state machine (`src/graph/workflow.py`). 
+
+1. **Initialization:** The state initializes with the user's `user_directive` and extracted `raw_metadata`.
+2. **Planning:** The Planner formulates the `analysis_plan`.
+3. **Human-in-the-Loop (HITL):** Execution explicitly pauses here. The user must review the plan, ensuring human oversight over the proposed methodology.
+4. **Execution Loop:** 
+   - The Executor generates and runs the code.
+   - The Critic reviews the outputs.
+   - If the Critic rejects the output (e.g., poor data quality or unhandled errors), control loops back to the Executor. This recursive loop has a hardcoded limit (e.g., 5 retries) to prevent infinite loops.
+5. **Finalization:** Once the Critic approves, the graph terminates, and the final state (containing the exact methodology and plots) is saved as a complete report.
+
+---
+
+## 4. LLM Factory Architecture
+
+To maintain flexibility between local deployment and cloud scalability, agent initialization is routed through an LLM Factory (`src/agents/llm_factory.py`).
+
+By configuring environment variables (e.g., `LLM_PROVIDER`), the agents can seamlessly switch between:
+- **Local / Open-Source Backend:** vLLM instances running models like Mixtral (for Planner/Executor) and LLaVA (for the Multimodal Critic).
+- **Cloud Backend:** Google Gemini endpoints (e.g., `gemini-1.5-pro`), natively supporting both text and multimodal prompts across all agents.
