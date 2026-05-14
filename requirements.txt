@@ -1,0 +1,17 @@
+langgraph
+langchain
+langchain-openai
+chromadb
+jupyter_client
+websockets
+pydantic
+mne
+python-dotenv
+websocket-client
+langchain-google-genai
+pypdf
+langchain-community
+langchain-huggingface
+sentence-transformers
+unstructured[pdf]
+lark
