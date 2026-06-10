@@ -19,12 +19,16 @@ def generate_summary(doc_text: str, llm) -> str:
     summary = chain.invoke({"text": doc_text[:10000]})
     return summary.content
 
-def ingest_scientific_papers(docs_dir, db_dir, embeddings, llm):
+def ingest_scientific_papers(articles_dir, db_dir, embeddings, llm):
     print("\n--- Processing Scientific Papers (PDF) ---")
-    pdf_files = [os.path.join(docs_dir, f) for f in os.listdir(docs_dir) if f.endswith('.pdf')]
+    if not os.path.exists(articles_dir):
+        print("Articles directory does not exist.")
+        return
+        
+    pdf_files = [os.path.join(articles_dir, f) for f in os.listdir(articles_dir) if f.endswith('.pdf')]
     
     if not pdf_files:
-        print("No PDF files found.")
+        print("No PDF files found in articles/.")
         return
 
     vector_store = Chroma(
@@ -62,21 +66,69 @@ def ingest_scientific_papers(docs_dir, db_dir, embeddings, llm):
         # Inject metadata into every chunk
         for chunk in chunks:
             chunk.metadata['global_summary'] = summary
-            # We could use LLM here to classify Paradigm/Library but for now just tag it
             chunk.metadata['source_type'] = 'Scientific Paper'
             
         vector_store.add_documents(chunks)
         print(f"Successfully added {len(chunks)} chunks for {os.path.basename(pdf_path)}.")
 
-def ingest_api_docs(docs_dir, db_dir, embeddings):
+def ingest_books(books_dir, db_dir, embeddings):
+    print("\n--- Processing Books (PDF) ---")
+    if not os.path.exists(books_dir):
+        print("Books directory does not exist.")
+        return
+        
+    pdf_files = [os.path.join(books_dir, f) for f in os.listdir(books_dir) if f.endswith('.pdf')]
+    
+    if not pdf_files:
+        print("No book PDF files found in books/.")
+        return
+
+    vector_store = Chroma(
+        collection_name="neuroimage_methods",
+        embedding_function=embeddings,
+        persist_directory=db_dir
+    )
+
+    for pdf_path in pdf_files:
+        print(f"Ingesting book {os.path.basename(pdf_path)}...")
+        try:
+            from langchain_community.document_loaders import PyPDFLoader
+            loader = PyPDFLoader(pdf_path)
+            docs = loader.load()
+            splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=300)
+            chunks = splitter.split_documents(docs)
+        except Exception as e:
+            print(f"Error loading book {pdf_path}: {e}")
+            continue
+
+        if not chunks:
+            continue
+
+        # For books, generating LLM summaries for every chunk or full book is impractical.
+        # We store the book title/filename as the global summary reference.
+        book_title = os.path.basename(pdf_path).replace(".pdf", "").replace("_", " ")
+        summary = f"Reference textbook: {book_title}"
+
+        for chunk in chunks:
+            chunk.metadata['global_summary'] = summary
+            chunk.metadata['source_type'] = 'Book'
+
+        vector_store.add_documents(chunks)
+        print(f"Successfully added {len(chunks)} chunks for book {os.path.basename(pdf_path)}.")
+
+def ingest_api_docs(api_docs_dir, db_dir, embeddings):
     print("\n--- Processing API Documentation (TXT/MD) ---")
-    txt_loader = DirectoryLoader(docs_dir, glob="**/*.txt")
-    md_loader = DirectoryLoader(docs_dir, glob="**/*.md")
+    if not os.path.exists(api_docs_dir):
+        print("API docs directory does not exist.")
+        return
+        
+    txt_loader = DirectoryLoader(api_docs_dir, glob="**/*.txt")
+    md_loader = DirectoryLoader(api_docs_dir, glob="**/*.md")
     
     docs = txt_loader.load() + md_loader.load()
     
     if not docs:
-        print("No TXT/MD files found.")
+        print("No TXT/MD files found in mne_python_docs/.")
         return
         
     print(f"Found {len(docs)} API documentation files. Initializing ParentDocumentRetriever...")
@@ -112,21 +164,28 @@ def main():
     docs_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "rag_docs"))
     db_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "chroma_data"))
     
-    if not os.path.exists(docs_dir):
-        os.makedirs(docs_dir)
-        print(f"Created directory {docs_dir}.")
-        print("Please place your PDF or TXT methodology papers and API documentation in this folder and run again.")
-        sys.exit(0)
+    articles_dir = os.path.join(docs_dir, "articles")
+    books_dir = os.path.join(docs_dir, "books")
+    api_docs_dir = os.path.join(docs_dir, "mne_python_docs")
+    
+    # Create subdirectories if they don't exist
+    for d in [docs_dir, articles_dir, books_dir, api_docs_dir]:
+        if not os.path.exists(d):
+            os.makedirs(d)
+            print(f"Created directory {d}.")
         
     print("Initializing LLM and Embedding Models...")
     llm = get_llm(agent_type="text", temperature=0.0)
     embeddings = get_embeddings()
     
     # 1. Scientific Papers (Layout Chunking + Summaries)
-    ingest_scientific_papers(docs_dir, db_dir, embeddings, llm)
+    ingest_scientific_papers(articles_dir, db_dir, embeddings, llm)
     
-    # 2. API Documentation (Hierarchical Indexing)
-    ingest_api_docs(docs_dir, db_dir, embeddings)
+    # 2. Books (Recursive Chunking)
+    ingest_books(books_dir, db_dir, embeddings)
+    
+    # 3. API Documentation (Hierarchical Indexing)
+    ingest_api_docs(api_docs_dir, db_dir, embeddings)
     
     print(f"\nSuccessfully populated Dual-Strategy RAG Database at {db_dir}")
 
