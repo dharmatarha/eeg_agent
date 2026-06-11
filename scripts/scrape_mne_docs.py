@@ -10,10 +10,14 @@ import os
 import re
 import sys
 import argparse
+import logging
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from src.utils.logging_config import setup_logging
+
+logger = logging.getLogger("eeg_agent.scrape")
 
 # Seed URLs for crawling
 API_REF_URL = "https://mne.tools/stable/api/python_reference.html"
@@ -30,7 +34,7 @@ def get_links(url, pattern_func):
         response = requests.get(url, timeout=15)
         response.raise_for_status()
     except Exception as e:
-        print(f"Error fetching seed URL {url}: {e}")
+        logger.error("Error fetching seed URL %s: %s", url, e)
         return set()
 
     soup = BeautifulSoup(response.content, 'html.parser')
@@ -129,6 +133,9 @@ def scrape_page(url, output_dir):
         return url, False, f"File Write Error: {e}"
 
 def main():
+    load_dotenv(override=True)
+    setup_logging()
+    
     parser = argparse.ArgumentParser(description="Scrape stable MNE-Python documentation for RAG database.")
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR, help="Directory to save scraped text files.")
     parser.add_argument("--limit", type=int, default=None, help="Limit the number of pages to scrape (for testing).")
@@ -136,19 +143,19 @@ def main():
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
-    print(f"Output directory initialized at: {args.output_dir}")
+    logger.info("Output directory initialized at: %s", args.output_dir)
 
     # Gather API Reference Links
-    print("Collecting API Reference pages...")
+    logger.info("Collecting API Reference pages...")
     is_api_link = lambda u: u.startswith("https://mne.tools/stable/generated/mne.") and u.endswith(".html")
     api_links = get_links(API_REF_URL, is_api_link)
-    print(f"Found {len(api_links)} API reference pages.")
+    logger.info("Found %d API reference pages.", len(api_links))
 
     # Gather Tutorial Links
-    print("Collecting Tutorial pages...")
+    logger.info("Collecting Tutorial pages...")
     is_tutorial_link = lambda u: u.startswith("https://mne.tools/stable/auto_tutorials/") and u.endswith(".html") and "/index.html" not in u
     tutorial_links = get_links(TUTORIALS_URL, is_tutorial_link)
-    print(f"Found {len(tutorial_links)} tutorial pages.")
+    logger.info("Found %d tutorial pages.", len(tutorial_links))
 
     # Combine all pages
     all_urls = sorted(list(api_links.union(tutorial_links)))
@@ -156,15 +163,15 @@ def main():
     
     if args.limit:
         all_urls = all_urls[:args.limit]
-        print(f"Limit option set. Scrape list limited to first {len(all_urls)} pages out of {total_found}.")
+        logger.info("Limit option set. Scrape list limited to first %d pages out of %d.", len(all_urls), total_found)
     else:
-        print(f"Scraping all {len(all_urls)} pages.")
+        logger.info("Scraping all %d pages.", len(all_urls))
 
     if not all_urls:
-        print("No URLs collected. Exiting.")
+        logger.error("No URLs collected. Exiting.")
         sys.exit(1)
 
-    print(f"Starting crawl with {args.threads} threads...")
+    logger.info("Starting crawl with %d threads...", args.threads)
     
     success_count = 0
     failure_count = 0
@@ -178,17 +185,18 @@ def main():
                 success_count += 1
                 # Show simple periodic progress
                 if i % 25 == 0 or i == len(all_urls):
-                    print(f"Progress: [{i}/{len(all_urls)}] Scraped {msg}")
+                    logger.info("Progress: [%d/%d] Scraped %s", i, len(all_urls), msg)
             else:
                 failure_count += 1
-                print(f"[-] Failed to scrape {url}: {msg}")
+                logger.error("Failed to scrape %s: %s", url, msg)
 
-    print("\n--- Scraping Complete ---")
-    print(f"Successfully scraped: {success_count} pages")
-    print(f"Failed to scrape:     {failure_count} pages")
-    print(f"Documents saved in:   {args.output_dir}")
-    print("\nYou can now populate your vector database by running:")
-    print("  python scripts/ingest_rag_data.py")
+    logger.info("--- Scraping Complete ---")
+    logger.info("Successfully scraped: %d pages", success_count)
+    logger.info("Failed to scrape:     %d pages", failure_count)
+    logger.info("Documents saved in:   %s", args.output_dir)
+    logger.info("You can now populate your vector database by running:")
+    logger.info("  python scripts/ingest_rag_data.py --category api")
 
 if __name__ == "__main__":
+    from dotenv import load_dotenv
     main()

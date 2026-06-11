@@ -1,17 +1,22 @@
 import os
+import torch
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
+from src import config
 
-def get_llm(agent_type="text", temperature=0.1):
+def get_llm(agent_type="text", temperature=None):
     """
-    Factory function to get the appropriate LLM based on environment configuration.
+    Factory function to get the appropriate LLM based on configuration.
     Supports 'vllm' (default, OpenAI-compatible) and 'gemini'.
     """
-    provider = os.environ.get("LLM_PROVIDER", "vllm").lower()
+    provider = config.get_val("llm_provider", "LLM_PROVIDER").lower()
     
+    if temperature is None:
+        temperature = float(config.get_val("planner.temperature"))
+        
     if provider == "gemini":
-        # Gemini handles multimodal transparently with the same model (e.g. gemini-1.5-pro)
-        model = os.environ.get("GEMINI_MODEL", "gemini-1.5-pro")
+        # Gemini handles multimodal transparently with the same model
+        model = config.get_val("gemini_model", "GEMINI_MODEL")
         return ChatGoogleGenerativeAI(
             model=model,
             temperature=temperature,
@@ -19,13 +24,13 @@ def get_llm(agent_type="text", temperature=0.1):
         )
     else:
         # Default to vLLM (OpenAI compatible)
-        base_url = os.environ.get("VLLM_API_BASE", "http://localhost:8000/v1")
-        api_key = os.environ.get("VLLM_API_KEY", "EMPTY")
+        base_url = config.get_val("vllm_api_base", "VLLM_API_BASE")
+        api_key = config.get_val("vllm_api_key", "VLLM_API_KEY")
         
         if agent_type == "multimodal":
-            model = os.environ.get("VLM_MODEL", "llava-hf/llava-1.5-7b-hf")
+            model = config.get_val("vlm_model", "VLM_MODEL")
         else:
-            model = os.environ.get("VLLM_MODEL", "mistralai/Mixtral-8x7B-Instruct-v0.1")
+            model = config.get_val("vllm_model", "VLLM_MODEL")
             
         return ChatOpenAI(
             base_url=base_url,
@@ -35,20 +40,38 @@ def get_llm(agent_type="text", temperature=0.1):
         )
 
 def get_embeddings():
-    embedding_provider = os.environ.get("EMBEDDING_PROVIDER", os.environ.get("LLM_PROVIDER", "vllm")).lower()
+    embedding_provider = config.get_val("embedding_provider", "EMBEDDING_PROVIDER").lower()
+    model_name = config.get_val("embedding_model", "EMBEDDING_MODEL")
     
     if embedding_provider == "gemini":
         from langchain_google_genai import GoogleGenerativeAIEmbeddings
-        return GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=os.environ.get("GOOGLE_API_KEY"))
+        return GoogleGenerativeAIEmbeddings(model=model_name, google_api_key=os.environ.get("GOOGLE_API_KEY"))
     elif embedding_provider == "local":
         from langchain_huggingface import HuggingFaceEmbeddings
-        # BAAI/bge-small-en-v1.5 is a fast, highly-rated open source embedding model
-        model_name = os.environ.get("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
-        return HuggingFaceEmbeddings(model_name=model_name)
+        
+        # Determine optimal device and precision options
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model_kwargs = {"device": device, "trust_remote_code": True}
+        
+        if device == "cuda":
+            # Force half-precision (bfloat16 or float16) to conserve GPU memory
+            if torch.cuda.is_bf16_supported():
+                model_kwargs["model_kwargs"] = {"torch_dtype": torch.bfloat16}
+            else:
+                model_kwargs["model_kwargs"] = {"torch_dtype": torch.float16}
+        
+        # Keep batch_size low to prevent CUDA OutOfMemory on large texts/books
+        encode_kwargs = {"batch_size": 4}
+        
+        return HuggingFaceEmbeddings(
+            model_name=model_name,
+            model_kwargs=model_kwargs,
+            encode_kwargs=encode_kwargs
+        )
     else:
         from langchain_openai import OpenAIEmbeddings
         return OpenAIEmbeddings(
-            base_url=os.environ.get("VLLM_API_BASE", "http://localhost:8000/v1"),
-            api_key=os.environ.get("VLLM_API_KEY", "EMPTY"),
-            model=os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
+            base_url=config.get_val("vllm_api_base", "VLLM_API_BASE"),
+            api_key=config.get_val("vllm_api_key", "VLLM_API_KEY"),
+            model=model_name
         )

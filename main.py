@@ -1,12 +1,17 @@
 import os
 import sys
+import logging
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph
 from src.graph.workflow import build_workflow
 from src.tools.metadata_extractor import metadata_extractor
+from src.utils.logging_config import setup_logging
+
+logger = logging.getLogger("eeg_agent.main")
 
 def main():
-    load_dotenv()
+    load_dotenv(override=True)
+    setup_logging()
     
     print("=== EEG-ADK Multi-Agent System ===")
     
@@ -21,7 +26,7 @@ def main():
     data_path = os.path.join(data_dir, rel_path)
     
     if not os.path.exists(data_path):
-        print(f"Error: Path '{data_path}' does not exist.")
+        logger.error("Path '%s' does not exist.", data_path)
         sys.exit(1)
         
     # We must pass the container-side path to the Planner so it writes correct code
@@ -29,7 +34,7 @@ def main():
         
     directive = input("Enter high-level analysis directive: ").strip()
     
-    print("\n[System] Extracting metadata...")
+    logger.info("Extracting metadata for %s...", data_path)
     raw_metadata = metadata_extractor.invoke({"file_path": data_path})
     
     initial_state = {
@@ -44,12 +49,12 @@ def main():
         "is_approved": False
     }
     
-    print("\n[System] Building Orchestration Graph...")
+    logger.info("Building Orchestration Graph...")
     app = build_workflow()
     
     config = {"configurable": {"thread_id": "1"}}
     
-    print("\n[System] Invoking Planner Agent...")
+    logger.info("Invoking Planner Agent...")
     
     # Stream until interrupt
     for event in app.stream(initial_state, config=config):
@@ -67,18 +72,18 @@ def main():
     action = input("Press ENTER to approve and execute, or type feedback to adjust: ").strip()
     
     if action:
-        print("[System] Adding feedback. In a full app, this would route back to the planner.")
+        logger.info("Adding user feedback to plan.")
         # For simplicity, we just inject it into the plan or state here and proceed
         app.update_state(config, {"analysis_plan": f"USER FEEDBACK: {action}\n\n" + initial_state["analysis_plan"]})
         
-    print("\n[System] Resuming execution (Executor -> Critic)...")
+    logger.info("Resuming execution (Executor -> Critic)...")
     
     final_state = None
     for event in app.stream(None, config=config):
         for k, v in event.items():
-            print(f"\n[{k.upper()} COMPLETED]")
+            logger.info("Node completed: %s", k.upper())
             if "critic_feedback" in v:
-                print(f"Critic Feedback:\n{v['critic_feedback']}")
+                print(f"\nCritic Feedback:\n{v['critic_feedback']}")
         final_state = event
         
     print("\n=== Workflow Completed ===")
@@ -87,14 +92,15 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     
     state_data = app.get_state(config).values
-    with open(os.path.join(output_dir, "final_report.md"), "w") as f:
+    report_path = os.path.join(output_dir, "final_report.md")
+    with open(report_path, "w") as f:
         f.write("# Final Analysis Report\n\n")
         f.write("## Plan Executed\n")
         f.write(state_data.get("analysis_plan", ""))
         f.write("\n\n## Critic Feedback & Results\n")
         f.write(state_data.get("critic_feedback", ""))
         
-    print(f"\nReport saved to {output_dir}/final_report.md")
+    logger.info("Report saved to %s", report_path)
 
 if __name__ == "__main__":
     main()
