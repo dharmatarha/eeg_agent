@@ -16,3 +16,4 @@ sentence-transformers
 unstructured[pdf]
 lark
 langchain-chroma
+docling
