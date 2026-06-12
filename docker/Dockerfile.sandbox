@@ -29,7 +29,7 @@ ENV LD_LIBRARY_PATH="/usr/local/MATLAB/MATLAB_Runtime/v241/runtime/glnxa64:/usr/
 # Install Python Neuroimaging Stack
 RUN pip3 install --upgrade pip
 RUN pip3 install \
-    mne mne-bids mne-connectivity autoreject pyprep \
+    mne mne-bids mne-connectivity mne-bids-pipeline autoreject pyprep \
     scikit-learn pandas matplotlib jupyter_client \
     jupyter_kernel_gateway
 

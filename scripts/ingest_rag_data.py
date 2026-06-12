@@ -76,23 +76,96 @@ def ingest_scientific_papers(articles_dir, db_dir, embeddings, llm, force=False)
 
         logger.info("Ingesting %s with Layout-Aware Chunking...", file_basename)
         
-        # Standard fast and memory-safe PDF loading
-        from langchain_community.document_loaders import PyPDFLoader
+        chunks = []
+        article_title = file_basename.replace(".pdf", "").replace("_", " ")
+        
+        # Try layout-aware chunking using Docling
         try:
-            loader = PyPDFLoader(pdf_path)
-            docs = loader.load()
+            logger.info("Attempting layout-aware parsing with Docling for %s...", file_basename)
+            from docling.document_converter import DocumentConverter
+            from docling.chunking import HybridChunker
+            from langchain_core.documents import Document
+
+            converter = DocumentConverter()
+            result = converter.convert(pdf_path)
+            doc = result.document
+
             chunk_size = int(config.get_val("ingestion.articles.chunk_size"))
-            chunk_overlap = int(config.get_val("ingestion.articles.chunk_overlap"))
-            splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-            chunks = splitter.split_documents(docs)
-        except Exception as e:
-            logger.error("Error loading %s: %s", pdf_path, e)
-            continue
+            # HybridChunker automatically chunks at paragraph/section level
+            chunker = HybridChunker(max_tokens=chunk_size)
+            doc_chunks = list(chunker.chunk(doc))
+
+            logger.info("Docling parsed and generated %d chunks.", len(doc_chunks))
+
+            for chunk in doc_chunks:
+                # Extract headings path
+                headings = chunk.meta.headings
+                heading_context = " > ".join(headings) if headings else ""
+                
+                # Extract page numbers from provenance
+                page_numbers = set()
+                if hasattr(chunk.meta, "doc_items") and chunk.meta.doc_items:
+                    for item in chunk.meta.doc_items:
+                        if hasattr(item, "prov") and item.prov:
+                            for prov in item.prov:
+                                if hasattr(prov, "page_no"):
+                                    page_numbers.add(prov.page_no)
+                                elif isinstance(prov, dict) and "page_no" in prov:
+                                    page_numbers.add(prov["page_no"])
+
+                sorted_pages = sorted(list(page_numbers))
+                page_context = f"Pages: {', '.join(map(str, sorted_pages))}" if sorted_pages else ""
+
+                # Construct prepended context info
+                context_lines = [f"Article: {article_title}"]
+                if heading_context:
+                    context_lines.append(f"Section: {heading_context}")
+                if page_context:
+                    context_lines.append(page_context)
+
+                prefix = "\n".join(context_lines) + "\n\n"
+                full_text = prefix + chunk.text
+
+                metadata = {
+                    "source": pdf_path,
+                    "source_type": "Scientific Paper",
+                    "headings": heading_context,
+                    "page_numbers": ", ".join(map(str, sorted_pages)) if sorted_pages else ""
+                }
+                chunks.append(Document(page_content=full_text, metadata=metadata))
+
+        except Exception as docling_err:
+            logger.warning(
+                "Docling processing failed or was not fully completed for article %s. "
+                "Falling back to PyPDFLoader + RecursiveCharacterTextSplitter. Error: %s",
+                file_basename, docling_err, exc_info=True
+            )
+            chunks = []  # reset and fall back
+
+        # Fallback to standard PDF loading if docling failed or returned no chunks
+        if not chunks:
+            try:
+                from langchain_community.document_loaders import PyPDFLoader
+                from langchain_core.documents import Document
+                logger.info("Running fallback PDF loader for %s...", file_basename)
+                loader = PyPDFLoader(pdf_path)
+                docs = loader.load()
+                chunk_size = int(config.get_val("ingestion.articles.chunk_size"))
+                chunk_overlap = int(config.get_val("ingestion.articles.chunk_overlap"))
+                splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+                chunks = splitter.split_documents(docs)
+                
+                # Apply standard article metadata
+                for chunk in chunks:
+                    chunk.metadata['source_type'] = 'Scientific Paper'
+            except Exception as fallback_err:
+                logger.error("Fallback loader also failed for article %s: %s", pdf_path, fallback_err)
+                continue
 
         if not chunks:
             continue
             
-        # Generate Global Summary from the full text
+        # Generate Global Summary from the full text of all chunks
         full_text = "\n".join([c.page_content for c in chunks])
         logger.info("Generating Methods Summary using LLM for %s...", file_basename)
         try:
@@ -101,10 +174,9 @@ def ingest_scientific_papers(articles_dir, db_dir, embeddings, llm, force=False)
             logger.warning("Failed to generate summary: %s", e)
             summary = "Summary unavailable."
             
-        # Inject metadata into every chunk
+        # Inject global summary metadata into every chunk
         for chunk in chunks:
             chunk.metadata['global_summary'] = summary
-            chunk.metadata['source_type'] = 'Scientific Paper'
             
         # Assign deterministic IDs to prevent duplicates
         ids = [f"{file_basename}_chunk_{i}" for i in range(len(chunks))]

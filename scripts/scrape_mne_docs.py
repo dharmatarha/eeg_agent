@@ -100,20 +100,46 @@ def scrape_page(url, output_dir):
     if not text:
         return url, False, "No text content extracted."
 
-    # Generate a descriptive filename
-    # E.g. https://mne.tools/stable/generated/mne.io.read_raw_fif.html -> mne.io.read_raw_fif.txt
-    # E.g. https://mne.tools/stable/auto_tutorials/epochs/10_epochs_overview.html -> tutorial_epochs_10_epochs_overview.txt
+    # Determine Package and Filename
     filename = ""
-    if "/generated/" in url:
-        # API Page
-        filename = url.split('/')[-1].replace('.html', '.txt')
-    elif "/auto_tutorials/" in url:
-        # Tutorial Page
-        parts = url.split('/auto_tutorials/')[-1].split('/')
-        filename = "tutorial_" + "_".join(parts).replace('.html', '.txt')
+    pkg_title = "MNE-Python"
+    if "mne-bids/stable" in url:
+        pkg_title = "mne-bids"
+        prefix = "mne_bids_"
+        if "/generated/" in url:
+            filename = prefix + "api_" + url.split('/')[-1].replace('.html', '.txt')
+        else:
+            filename = prefix + "doc_" + url.split('/')[-1].replace('.html', '.txt')
+    elif "mne-connectivity/stable" in url:
+        pkg_title = "mne-connectivity"
+        prefix = "mne_connectivity_"
+        if "/generated/" in url:
+            filename = prefix + "api_" + url.split('/')[-1].replace('.html', '.txt')
+        elif "/auto_examples/" in url:
+            parts = url.split('/auto_examples/')[-1].split('/')
+            filename = prefix + "example_" + "_".join(parts).replace('.html', '.txt')
+        else:
+            filename = prefix + "doc_" + url.split('/')[-1].replace('.html', '.txt')
+    elif "mne-bids-pipeline/stable" in url:
+        pkg_title = "mne-bids-pipeline"
+        prefix = "mne_bids_pipeline_"
+        if "/settings/" in url:
+            parts = url.split('/settings/')[-1].split('/')
+            filename = prefix + "setting_" + "_".join(parts).replace('.html', '.txt')
+        elif "/examples/" in url:
+            parts = url.split('/examples/')[-1].split('/')
+            filename = prefix + "example_" + "_".join(parts).replace('.html', '.txt')
+        else:
+            filename = prefix + "doc_" + url.split('/')[-1].replace('.html', '.txt')
     else:
-        # General Page
-        filename = "doc_" + url.split('/')[-1].replace('.html', '.txt')
+        # Standard MNE-Python
+        if "/generated/" in url:
+            filename = url.split('/')[-1].replace('.html', '.txt')
+        elif "/auto_tutorials/" in url:
+            parts = url.split('/auto_tutorials/')[-1].split('/')
+            filename = "tutorial_" + "_".join(parts).replace('.html', '.txt')
+        else:
+            filename = "doc_" + url.split('/')[-1].replace('.html', '.txt')
 
     # Fallback for empty filenames
     if not filename or filename == ".txt":
@@ -124,7 +150,8 @@ def scrape_page(url, output_dir):
     try:
         with open(file_path, 'w', encoding='utf-8') as f:
             # Prepend metadata at the top for RAG context
-            f.write(f"Title: MNE-Python Documentation Page\n")
+            f.write(f"Package: {pkg_title}\n")
+            f.write(f"Title: {pkg_title} Documentation Page\n")
             f.write(f"Source URL: {url}\n")
             f.write("-" * 80 + "\n\n")
             f.write(text)
@@ -136,7 +163,7 @@ def main():
     load_dotenv(override=True)
     setup_logging()
     
-    parser = argparse.ArgumentParser(description="Scrape stable MNE-Python documentation for RAG database.")
+    parser = argparse.ArgumentParser(description="Scrape stable MNE documentation sets for RAG database.")
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR, help="Directory to save scraped text files.")
     parser.add_argument("--limit", type=int, default=None, help="Limit the number of pages to scrape (for testing).")
     parser.add_argument("--threads", type=int, default=15, help="Number of concurrent scraper threads.")
@@ -145,29 +172,74 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     logger.info("Output directory initialized at: %s", args.output_dir)
 
-    # Gather API Reference Links
-    logger.info("Collecting API Reference pages...")
+    # 1. Gather MNE-Python API Reference Links
+    logger.info("Collecting MNE-Python API Reference pages...")
     is_api_link = lambda u: u.startswith("https://mne.tools/stable/generated/mne.") and u.endswith(".html")
     api_links = get_links(API_REF_URL, is_api_link)
-    logger.info("Found %d API reference pages.", len(api_links))
+    logger.info("Found %d MNE-Python API reference pages.", len(api_links))
 
-    # Gather Tutorial Links
-    logger.info("Collecting Tutorial pages...")
+    # Gather MNE-Python Tutorial Links
+    logger.info("Collecting MNE-Python Tutorial pages...")
     is_tutorial_link = lambda u: u.startswith("https://mne.tools/stable/auto_tutorials/") and u.endswith(".html") and "/index.html" not in u
     tutorial_links = get_links(TUTORIALS_URL, is_tutorial_link)
-    logger.info("Found %d tutorial pages.", len(tutorial_links))
+    logger.info("Found %d MNE-Python tutorial pages.", len(tutorial_links))
 
-    # Combine all pages
-    all_urls = sorted(list(api_links.union(tutorial_links)))
-    total_found = len(all_urls)
+    # Combine MNE-Python URLs
+    all_urls = set(api_links.union(tutorial_links))
+
+    # 2. Gather MNE-BIDS Links
+    logger.info("Collecting MNE-BIDS pages...")
+    mne_bids_api_seed = "https://mne.tools/mne-bids/stable/api.html"
+    is_mne_bids_api = lambda u: u.startswith("https://mne.tools/mne-bids/stable/generated/") and u.endswith(".html")
+    mne_bids_api_links = get_links(mne_bids_api_seed, is_mne_bids_api)
+    logger.info("Found %d MNE-BIDS API pages.", len(mne_bids_api_links))
+    all_urls.update(mne_bids_api_links)
+    all_urls.add("https://mne.tools/mne-bids/stable/use.html")
+    all_urls.add(mne_bids_api_seed)
+
+    # 3. Gather MNE-Connectivity Links
+    logger.info("Collecting MNE-Connectivity pages...")
+    mne_conn_api_seed = "https://mne.tools/mne-connectivity/stable/api.html"
+    is_mne_conn_api = lambda u: u.startswith("https://mne.tools/mne-connectivity/stable/generated/") and u.endswith(".html")
+    mne_conn_api_links = get_links(mne_conn_api_seed, is_mne_conn_api)
+    
+    mne_conn_ex_seed = "https://mne.tools/mne-connectivity/stable/auto_examples/index.html"
+    is_mne_conn_ex = lambda u: u.startswith("https://mne.tools/mne-connectivity/stable/auto_examples/") and u.endswith(".html") and "/index.html" not in u
+    mne_conn_ex_links = get_links(mne_conn_ex_seed, is_mne_conn_ex)
+    
+    logger.info("Found %d MNE-Connectivity pages.", len(mne_conn_api_links) + len(mne_conn_ex_links))
+    all_urls.update(mne_conn_api_links)
+    all_urls.update(mne_conn_ex_links)
+    all_urls.add(mne_conn_api_seed)
+    all_urls.add(mne_conn_ex_seed)
+
+    # 4. Gather MNE-BIDS-Pipeline Links
+    logger.info("Collecting MNE-BIDS-Pipeline pages...")
+    pipeline_settings_seed = "https://mne.tools/mne-bids-pipeline/stable/settings/general.html"
+    is_pipeline_settings = lambda u: u.startswith("https://mne.tools/mne-bids-pipeline/stable/settings/") and u.endswith(".html")
+    pipeline_settings_links = get_links(pipeline_settings_seed, is_pipeline_settings)
+    
+    pipeline_ex_seed = "https://mne.tools/mne-bids-pipeline/stable/examples/examples.html"
+    is_pipeline_ex = lambda u: (u.startswith("https://mne.tools/mne-bids-pipeline/stable/examples/") or "/auto_examples/" in u) and u.endswith(".html")
+    pipeline_ex_links = get_links(pipeline_ex_seed, is_pipeline_ex)
+    
+    logger.info("Found %d MNE-BIDS-Pipeline pages.", len(pipeline_settings_links) + len(pipeline_ex_links))
+    all_urls.update(pipeline_settings_links)
+    all_urls.update(pipeline_ex_links)
+    all_urls.add(pipeline_settings_seed)
+    all_urls.add(pipeline_ex_seed)
+
+    # Convert to sorted list
+    all_urls_list = sorted(list(all_urls))
+    total_found = len(all_urls_list)
     
     if args.limit:
-        all_urls = all_urls[:args.limit]
-        logger.info("Limit option set. Scrape list limited to first %d pages out of %d.", len(all_urls), total_found)
+        all_urls_list = all_urls_list[:args.limit]
+        logger.info("Limit option set. Scrape list limited to first %d pages out of %d.", len(all_urls_list), total_found)
     else:
-        logger.info("Scraping all %d pages.", len(all_urls))
+        logger.info("Scraping all %d pages.", len(all_urls_list))
 
-    if not all_urls:
+    if not all_urls_list:
         logger.error("No URLs collected. Exiting.")
         sys.exit(1)
 
@@ -177,15 +249,15 @@ def main():
     failure_count = 0
 
     with ThreadPoolExecutor(max_workers=args.threads) as executor:
-        futures = {executor.submit(scrape_page, url, args.output_dir): url for url in all_urls}
+        futures = {executor.submit(scrape_page, url, args.output_dir): url for url in all_urls_list}
         
         for i, future in enumerate(as_completed(futures), 1):
             url, success, msg = future.result()
             if success:
                 success_count += 1
                 # Show simple periodic progress
-                if i % 25 == 0 or i == len(all_urls):
-                    logger.info("Progress: [%d/%d] Scraped %s", i, len(all_urls), msg)
+                if i % 25 == 0 or i == len(all_urls_list):
+                    logger.info("Progress: [%d/%d] Scraped %s", i, len(all_urls_list), msg)
             else:
                 failure_count += 1
                 logger.error("Failed to scrape %s: %s", url, msg)

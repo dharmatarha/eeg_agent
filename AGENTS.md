@@ -13,8 +13,9 @@ The system delegates specialized tasks to three primary agents, each configured 
 - **Source File:** `src/agents/planner.py`
 - **Core Function:** Translates vague user descriptions (e.g., "clean the N400 data") into concrete, technical MNE-Python analysis plans.
 - **Key Behaviors:** 
-  - Scans raw data file headers using the `metadata_extractor` tool to understand channels, sampling frequency, and triggers without fully loading the data into memory.
+  - Scans raw data file headers using the `metadata_extractor` tool (for single files) or the `bids_inspector` tool (for BIDS datasets/directories) to understand subjects, tasks, channels, and triggers without fully loading the data.
   - Queries the offline Vector Database (`scientific_rag`) to automatically populate missing standard parameters (like standard filter cutoffs).
+  - Outlines multi-subject loop and grand average architectures for group analyses.
   - Outputs a structured Analysis Plan that is presented to the user for Human-in-the-Loop (HITL) approval before any code executes.
 
 ### 💻 Executor (Programmer)
@@ -39,11 +40,12 @@ The system delegates specialized tasks to three primary agents, each configured 
 
 ## 2. Agent Tools
 
-The agents interact with the environment and external knowledge bases using three specialized tools:
+The agents interact with the environment and external knowledge bases using four specialized tools:
 
 1. **`metadata_extractor` (`src/tools/metadata_extractor.py`)**: A fast microservice that peeks into EEG file headers (like `.fif` or `.set`) to extract critical dimensions without loading large binary arrays.
-2. **`scientific_rag` (`src/tools/rag_search.py`)**: An offline RAG system powered by ChromaDB. It searches dual collections: scientific neuroimaging methods (for parameters) and the MNE-Python API documentation (for syntax).
-3. **`stateful_jupyter_exec` (`src/tools/jupyter_exec.py`)**: A WebSocket client that sends code strings to a persistent Dockerized Jupyter Kernel gateway, allowing sequential analysis steps while capturing text outputs, error tracebacks, and Base64 encoded plots.
+2. **`bids_inspector` (`src/tools/bids_inspector.py`)**: A directory-scanning microservice that parses BIDS dataset formats (`dataset_description.json`, `sub-*` folders), extracts subject lists, and captures representative EEG headers.
+3. **`scientific_rag` (`src/tools/rag_search.py`)**: An offline RAG system powered by ChromaDB. It searches dual collections: scientific neuroimaging methods (for parameters) and the MNE-Python API documentation (for syntax).
+4. **`stateful_jupyter_exec` (`src/tools/jupyter_exec.py`)**: A WebSocket client that sends code strings to a persistent Dockerized Jupyter Kernel gateway, allowing sequential analysis steps while capturing text outputs, error tracebacks, and Base64 encoded plots.
 
 ---
 

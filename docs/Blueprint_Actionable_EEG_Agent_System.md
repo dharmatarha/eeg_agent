@@ -37,6 +37,7 @@ The following tools are registered via Google ADK to facilitate high-fidelity EE
 | **scientific\_rag & doc\_crawler** | query (str), paradigm (str) | Build an offline Vector Database (ChromaDB/FAISS) pre-populated with standard Neuroimage methods papers and the official MNE-Python API documentation. Avoids live API rate limits and hallucinations. |
 | **stateful\_jupyter\_exec** | code\_string (str) | Connects to a Dockerized Kernel Gateway via WebSocket. Returns text/plain (logs) and image/png (Base64 data). Runs data-loading in "Turn 1" and filtering in "Turn 2" while data remains safely in RAM. |
 | **metadata\_extractor** | file\_path (str) | A pre-written Python microservice using mne.io.read\_raw(..., preload=False).info to immediately dump channels, sampling frequency, and annotations to JSON. |
+| **bids\_inspector** | bids\_root (str) | A directory-scanning microservice that crawls subject structures, parses dataset configurations, and extracts representative MNE raw headers. |
 
 ## **5\. Operational Workflow Execution**
 
@@ -68,18 +69,18 @@ Below is a boilerplate code snippet for registering the agents and tools using t
     `func=my_jupyter_websocket_client`  
 `)`
 
-`# 2. Define the Agents via ADK`  
-`planner = Agent(`  
-    `name="Planner",`  
-    `system_instruction="You are a Senior Neuroscientist. Translate vague descriptions...",`  
-    `tools=[research_tool, metadata_extractor_tool]`  
-`)`
+# 2. Define the Agents via ADK  
+planner = Agent(  
+    name="Planner",  
+    system_instruction="You are a Senior Neuroscientist. Translate vague descriptions...",  
+    tools=[research_tool, metadata_extractor_tool, bids_inspector_tool]  
+)
 
-`executor = Agent(`  
-    `name="Executor",`  
-    `system_instruction="You are a Python developer. Write memory-safe code...",`  
-    `tools=[sandbox_tool, doc_crawler_tool]`  
-`)`
+executor = Agent(  
+    name="Executor",  
+    system_instruction="You are a Python developer. Write memory-safe code...",  
+    tools=[sandbox_tool, doc_crawler_tool]  
+)
 
 `# Note: In a LangGraph setup, these agents act as nodes processing the global State object.`
 
