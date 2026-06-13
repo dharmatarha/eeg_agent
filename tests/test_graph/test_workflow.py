@@ -15,7 +15,7 @@ def test_planner_node(mock_get_planner):
     state = {"user_directive": "Clean data", "data_path": "/data/test.fif"}
     result = planner_node(state)
     
-    assert result == {"analysis_plan": "Mocked Plan"}
+    assert result == {"analysis_plan": "Mocked Plan", "rag_history": []}
 
 @patch("src.graph.workflow.get_executor_agent")
 def test_executor_node(mock_get_executor):
@@ -34,6 +34,8 @@ def test_executor_node(mock_get_executor):
     assert result["execution_logs"] == ["Executed print()"]
     assert result["generated_plots"] == ["base64"]
     assert result["error_count"] == 0
+    assert result["rag_history"] == []
+    assert result["executed_code_blocks"] == []
 
 @patch("src.graph.workflow.get_critic_agent")
 def test_critic_node_approve(mock_get_critic):

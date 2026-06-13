@@ -6,8 +6,55 @@ from src.agents.executor import get_executor_agent
 from src.agents.critic import get_critic_agent
 import json
 import logging
+import os
+import sqlite3
+from langgraph.checkpoint.sqlite import SqliteSaver
 
 logger = logging.getLogger("eeg_agent.workflow")
+
+def extract_tool_trace(messages):
+    rag_history = []
+    executed_code_blocks = []
+    
+    # Map to hold tool calls by their unique call ID for matching with execution outputs
+    tool_calls = {}
+    
+    for msg in messages:
+        if msg.type == "ai" and hasattr(msg, "tool_calls") and msg.tool_calls:
+            for tc in msg.tool_calls:
+                tool_calls[tc["id"]] = tc
+        elif msg.type == "tool":
+            call_id = getattr(msg, "tool_call_id", None)
+            tool_call = tool_calls.get(call_id)
+            tool_name = getattr(msg, "name", "") or (tool_call["name"] if tool_call else "")
+            
+            if tool_name == "scientific_rag":
+                query = tool_call["args"].get("query", "") if tool_call else "Unknown query"
+                paradigm = tool_call["args"].get("paradigm", "") if tool_call else ""
+                target = tool_call["args"].get("target", "both") if tool_call else "both"
+                rag_history.append({
+                    "query": query,
+                    "paradigm": paradigm,
+                    "target": target,
+                    "results": msg.content
+                })
+            elif tool_name == "stateful_jupyter_exec":
+                code = tool_call["args"].get("code_string", "") if tool_call else ""
+                try:
+                    res = json.loads(msg.content)
+                    logs = res.get("logs", "")
+                    error = res.get("error", False)
+                except Exception:
+                    logs = msg.content
+                    error = True
+                
+                executed_code_blocks.append({
+                    "code": code,
+                    "logs": logs,
+                    "error": error
+                })
+                
+    return rag_history, executed_code_blocks
 
 def planner_node(state: AgentState):
     logger.info("Planner Node: Starting plan generation...")
@@ -17,7 +64,15 @@ def planner_node(state: AgentState):
     
     final_message = result["messages"][-1].content
     logger.info("Planner Node: Plan generation completed.")
-    return {"analysis_plan": final_message}
+    
+    # Extract trace
+    rag_history, _ = extract_tool_trace(result["messages"])
+    
+    return {
+        "analysis_plan": final_message,
+        "rag_history": rag_history
+    }
+
 
 def executor_node(state: AgentState):
     logger.info("Executor Node: Starting code generation and execution in Docker Sandbox...")
@@ -29,6 +84,9 @@ def executor_node(state: AgentState):
         prompt += f"CRITIC FEEDBACK FROM PREVIOUS RUN: {state['critic_feedback']}\nPlease adjust your code accordingly.\n"
         
     result = executor.invoke({"messages": [HumanMessage(content=prompt)]})
+    
+    # Extract tool traces
+    rag_history, executed_code_blocks = extract_tool_trace(result["messages"])
     
     logs = []
     images = []
@@ -44,7 +102,7 @@ def executor_node(state: AgentState):
                     images.extend(res["images"])
                 if res.get("error", False):
                     error_occurred = True
-            except:
+            except Exception:
                 pass
 
     logger.info(
@@ -55,8 +113,11 @@ def executor_node(state: AgentState):
     return {
         "execution_logs": logs,
         "generated_plots": images,
-        "error_count": 1 if error_occurred else 0 # Simplified error tracking
+        "error_count": 1 if error_occurred else 0, # Simplified error tracking
+        "rag_history": rag_history,
+        "executed_code_blocks": executed_code_blocks
     }
+
 
 def critic_node(state: AgentState):
     logger.info("Critic Node: Invoking QA / review agent...")
@@ -88,8 +149,6 @@ def critic_router(state: AgentState):
         logger.info("Critic Router: Rejected. Routing back to Executor Node.")
         return "executor"
 
-from langgraph.checkpoint.memory import MemorySaver
-
 def build_workflow():
     logger.info("Building StateGraph workflow...")
     workflow = StateGraph(AgentState)
@@ -109,5 +168,13 @@ def build_workflow():
         END: END
     })
     
-    memory = MemorySaver()
+    # Setup persistent SQLite checkpoints
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    logs_dir = os.path.join(project_root, "logs")
+    os.makedirs(logs_dir, exist_ok=True)
+    db_path = os.path.join(logs_dir, "checkpoints.sqlite")
+    
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    memory = SqliteSaver(conn)
     return workflow.compile(interrupt_before=["executor"], checkpointer=memory)
+

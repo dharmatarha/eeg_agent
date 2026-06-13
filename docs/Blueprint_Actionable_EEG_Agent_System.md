@@ -11,13 +11,14 @@ The primary goal of this multi-agent architecture is to mitigate the inherent in
 1. **Synthesizing Procedural Automation:** Reducing researcher overhead by automating the generation of boilerplate code for ingestion, signal filtering, and visualization.  
 2. **Intelligent Parameter Inference:** Leveraging scientific RAG to function as an expert assistant, autonomously populating standardized research parameters (such as P300 filter specifications) when user input is underspecified.  
 3. **Adaptive Script Rectification:** Maintaining execution flow through iterative self-debugging; the system dynamically resolves syntax errors or memory bottlenecks rather than halting at the first failure.  
-4. **Verified Auditability:** Ensuring every computational decision and inference is logged to produce a manuscript-ready report that aligns perfectly with the underlying execution logs.
+4. **Verified Auditability:** Ensuring every computational decision and inference is persisted to SQLite (`logs/checkpoints.sqlite`), producing a standalone, runnable script (`output/analysis_pipeline.py`) alongside a manuscript-ready final audit report (`output/final_report.md`) that documents exact RAG queries, code blocks executed, and validation steps.
 
 ## **2\. System Architecture: State-Graph Orchestration**
 
 Simple sequential agent communication is insufficient and prone to infinite loops when debugging complex Python code. The orchestration is built on a **State-Graph framework**, where a shared "State" dictionary is maintained and updated by each node, while Google ADK defines the individual agents and their tools.
 
-* **State Object:** Contains raw\_metadata, current\_script, generated\_plots, critic\_feedback, and conversation\_history.  
+* **State Object:** Maintains fields for `user_directive`, `data_path`, `raw_metadata`, `analysis_plan`, `execution_logs`, `generated_plots`, `error_count`, `critic_feedback`, `is_approved`, as well as tracking fields `rag_history` (RAG citations) and `executed_code_blocks` (sandbox execution logs).  
+* **Persistence & Session Isolation:** Uses LangGraph `SqliteSaver` to maintain state checkpoints across workflow interruptions. Each execution uses a unique timestamped thread ID (`run_YYYYMMDD_HHMMSS_uuid`) for clean session isolation.
 * **Recursion Limits:** Hardcoded execution caps (e.g., maximum 5 retries for the Executor to fix an error) to prevent burning compute indefinitely. If the limit is reached, the graph halts and requests Human-in-the-Loop (HITL) intervention.
 
 ## **3\. Multi-Agent Architecture (Core Agents)**
@@ -123,7 +124,7 @@ The practical deployment of the system follows a **Human-in-the-Loop (HITL)** st
 **Step 6: Reporting & Synthesis**
 
 * Upon Critic approval, the graph consolidates all actions into a final data package.  
-* The researcher receives processed datasets, statistical CSVs, high-fidelity plots, and a Methods section that reflects the exact code executed.
+* The researcher receives processed datasets, statistical CSVs, high-fidelity plots, a standalone compiled Python script (`output/analysis_pipeline.py`), and a comprehensive audit report (`output/final_report.md`) detailing the user directive, file metadata, RAG retrieval audit log, sandbox code execution traces, and critic QA feedback.
 
 ## **9\. Technical Setup Guide: EEG-ADK Local Environment**
 

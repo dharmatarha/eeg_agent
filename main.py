@@ -3,6 +3,8 @@ import sys
 import logging
 import base64
 import json
+import uuid
+from datetime import datetime
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph
 from src.graph.workflow import build_workflow
@@ -79,13 +81,19 @@ def main():
         "generated_plots": [],
         "error_count": 0,
         "critic_feedback": "",
-        "is_approved": False
+        "is_approved": False,
+        "rag_history": [],
+        "executed_code_blocks": []
     }
     
     logger.info("Building Orchestration Graph...")
     app = build_workflow()
     
-    config = {"configurable": {"thread_id": "1"}}
+    run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_uuid = str(uuid.uuid4())[:8]
+    thread_id = f"run_{run_timestamp}_{run_uuid}"
+    config = {"configurable": {"thread_id": thread_id}}
+    logger.info("Initialized session with unique Thread ID: %s", thread_id)
     
     logger.info("Invoking Planner Agent...")
     
@@ -106,8 +114,9 @@ def main():
     
     if action:
         logger.info("Adding user feedback to plan.")
-        # For simplicity, we just inject it into the plan or state here and proceed
-        app.update_state(config, {"analysis_plan": f"USER FEEDBACK: {action}\n\n" + initial_state["analysis_plan"]})
+        current_state = app.get_state(config)
+        current_plan = current_state.values.get("analysis_plan", "")
+        app.update_state(config, {"analysis_plan": f"USER FEEDBACK: {action}\n\n" + current_plan})
         
     logger.info("Resuming execution (Executor -> Critic)...")
     
@@ -141,16 +150,77 @@ def main():
         except Exception as e:
             logger.error("Failed to save plot %d: %s", idx, e)
             
+    # 1. Compile successful code blocks into output/analysis_pipeline.py
+    executed_code_blocks = state_data.get("executed_code_blocks", [])
+    successful_code = []
+    
+    for idx, block in enumerate(executed_code_blocks):
+        if not block.get("error", False):
+            code = block.get("code", "").strip()
+            if code:
+                successful_code.append(f"# --- Code Block {idx + 1} ---\n{code}\n")
+                
+    if successful_code:
+        pipeline_path = os.path.join(output_dir, "analysis_pipeline.py")
+        with open(pipeline_path, "w") as f_py:
+            f_py.write("#!/usr/bin/env python\n")
+            f_py.write('"""\nGenerated EEG Analysis Pipeline\n')
+            f_py.write(f"Session Thread ID: {thread_id}\n")
+            f_py.write(f"User Directive: {directive}\n")
+            f_py.write('"""\n\n')
+            f_py.write("import mne\n")
+            f_py.write("mne.set_config('MNE_MEMMAP_MIN_SIZE', '10M')\n\n")
+            f_py.write("\n".join(successful_code))
+        logger.info("Saved successful analysis pipeline script to %s", pipeline_path)
+
     report_path = os.path.join(output_dir, "final_report.md")
     with open(report_path, "w") as f:
-        f.write("# Final Analysis Report\n\n")
-        f.write("## Plan Executed\n")
-        f.write(state_data.get("analysis_plan", ""))
-        f.write("\n\n## Critic Feedback & Results\n")
-        f.write(state_data.get("critic_feedback", ""))
+        f.write(f"# Final Analysis Report - Session `{thread_id}`\n\n")
+        
+        f.write("## 1. User Directive & Raw Metadata\n")
+        f.write(f"**Directive:** {directive}\n\n")
+        f.write("### Extracted Metadata:\n")
+        f.write("```json\n")
+        f.write(state_data.get("raw_metadata", "{}"))
+        f.write("\n```\n\n")
+        
+        f.write("## 2. Plan Executed\n")
+        f.write(state_data.get("analysis_plan", "No plan generated."))
+        f.write("\n\n")
+        
+        # RAG retrieval audit log
+        rag_history = state_data.get("rag_history", [])
+        if rag_history:
+            f.write("## 3. RAG Retrieval Audit Log\n")
+            f.write("The following scientific findings and API references were retrieved during the session:\n\n")
+            for idx, item in enumerate(rag_history):
+                f.write(f"### Query {idx + 1}: `{item.get('query', '')}`\n")
+                f.write(f"- **Paradigm**: {item.get('paradigm', 'N/A')}\n")
+                f.write(f"- **Target Collection**: {item.get('target', 'both')}\n\n")
+                f.write("<details>\n<summary>Click to view retrieved reference text</summary>\n\n")
+                f.write(item.get("results", "No results returned."))
+                f.write("\n\n</details>\n\n")
+        
+        # Detailed code execution trace
+        if executed_code_blocks:
+            f.write("## 4. Code Execution Trace\n")
+            f.write("Below is the sequence of Python scripts executed inside the Docker Sandbox:\n\n")
+            for idx, block in enumerate(executed_code_blocks):
+                status_str = "❌ Failed" if block.get("error", False) else "✅ Success"
+                f.write(f"### Block {idx + 1} ({status_str})\n")
+                f.write("```python\n")
+                f.write(block.get("code", ""))
+                f.write("\n```\n")
+                f.write("#### Output logs:\n")
+                f.write("```\n")
+                f.write(block.get("logs", "").strip() or "No output.")
+                f.write("\n```\n\n")
+                
+        f.write("## 5. Critic Feedback & Quality Assurance\n")
+        f.write(state_data.get("critic_feedback", "No critic feedback registered."))
         
         if plot_files:
-            f.write("\n\n## Visual Artifacts\n")
+            f.write("\n\n## 6. Visual Artifacts\n")
             for filename in plot_files:
                 f.write(f"![{filename}]({filename})\n\n")
         

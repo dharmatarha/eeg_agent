@@ -15,3 +15,7 @@ class AgentState(TypedDict):
     # Critic state
     critic_feedback: str
     is_approved: bool
+
+    # Tracking & Audit
+    rag_history: Annotated[List[dict], operator.add]
+    executed_code_blocks: Annotated[List[dict], operator.add]

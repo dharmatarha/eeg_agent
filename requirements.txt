@@ -17,3 +17,4 @@ unstructured[pdf]
 lark
 langchain-chroma
 docling
+langgraph-checkpoint-sqlite

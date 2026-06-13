@@ -71,3 +71,15 @@ To maintain flexibility between local deployment and cloud scalability, agent in
 By configuring environment variables (e.g., `LLM_PROVIDER`), the agents can seamlessly switch between:
 - **Local / Open-Source Backend:** vLLM instances running models like Mixtral (for Planner/Executor) and LLaVA (for the Multimodal Critic).
 - **Cloud Backend:** Google Gemini endpoints (e.g., `gemini-1.5-pro`), natively supporting both text and multimodal prompts across all agents.
+
+---
+
+## 5. State Persistence & Audit Trails
+
+To ensure maximum transparency, reproducibility, and auditability, the system replaces ephemeral in-memory checkpointing with persistent session logging:
+
+1. **Persistent Checkpoints (`logs/checkpoints.sqlite`):** All execution states, variable bounds, and agent decisions are serialized into a local SQLite database using LangGraph's `SqliteSaver`. Each execution session is isolated using a unique `thread_id` (e.g., `run_YYYYMMDD_HHMMSS_uuid`).
+2. **RAG Provenance Auditing:** All scientific queries, retrieval contexts, and documentation excerpts populated by `scientific_rag` are tracked inside the `rag_history` list. This enables researchers to verify the origin of all inferred parameters.
+3. **Executable Code Aggregation (`output/analysis_pipeline.py`):** Successful Python code blocks executed in the stateful Jupyter sandbox are compiled into a standalone, reproducible MNE-Python script at the end of the execution run.
+4. **Comprehensive Audit Reporting (`output/final_report.md`):** Consolidates the original user directive, extracted raw metadata, RAG logs (with collapsible source blocks), full sandbox code execution traces, and critic reviews into a unified report.
+
