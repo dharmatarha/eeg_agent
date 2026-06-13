@@ -19,8 +19,12 @@ def main():
     
     print("=== EEG-ADK Multi-Agent System ===")
     
-    # The Docker container only has access to the mapped 'data' directory
-    data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "data"))
+    # The Docker container only has access to the mapped 'data' directory (configured dynamically via EEG_DATA_DIR)
+    data_dir = os.environ.get("EEG_DATA_DIR")
+    if data_dir:
+        data_dir = os.path.abspath(data_dir)
+    else:
+        data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "data"))
     os.makedirs(data_dir, exist_ok=True)
     
     print(f"\nNote: The Docker Sandbox only has access to files inside:\n{data_dir}")
