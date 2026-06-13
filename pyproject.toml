@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eeg-agent"
+version = "0.1.0"
+description = "EEG-ADK Multi-Agent System: State-Graph Orchestration & Stateful Sandbox"
+readme = "README.md"
+authors = [
+    { name = "EEG Agent Developers" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "langgraph",
+    "langchain",
+    "langchain-openai",
+    "chromadb",
+    "jupyter_client",
+    "websockets",
+    "pydantic",
+    "mne",
+    "python-dotenv",
+    "websocket-client",
+    "langchain-google-genai",
+    "pypdf",
+    "langchain-community",
+    "langchain-huggingface",
+    "sentence-transformers",
+    "unstructured[pdf]",
+    "lark",
+    "langchain-chroma",
+    "docling",
+    "langgraph-checkpoint-sqlite"
+]
+
+[project.scripts]
+eeg-agent = "main:main"
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
