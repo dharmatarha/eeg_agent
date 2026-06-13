@@ -77,3 +77,9 @@ data/
 logs/
 outputs/
 docker/volumes/
+
+# RAG docs as those might be proprietary and large
+rag_docs/
+
+# Chroma DB (vector store)
+chroma_data/
