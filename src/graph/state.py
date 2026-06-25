@@ -8,8 +8,8 @@ class AgentState(TypedDict):
     analysis_plan: str
     
     # Executor state
-    execution_logs: Annotated[List[str], operator.add]
-    generated_plots: Annotated[List[str], operator.add] # Base64 images
+    execution_logs: List[str]
+    generated_plots: List[str] # Base64 images
     error_count: int
     
     # Critic state

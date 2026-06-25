@@ -110,10 +110,11 @@ def executor_node(state: AgentState):
         not error_occurred,
         len(images)
     )
+    current_errors = state.get("error_count", 0)
     return {
         "execution_logs": logs,
         "generated_plots": images,
-        "error_count": 1 if error_occurred else 0, # Simplified error tracking
+        "error_count": current_errors + 1 if error_occurred else current_errors,
         "rag_history": rag_history,
         "executed_code_blocks": executed_code_blocks
     }

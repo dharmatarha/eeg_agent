@@ -2,6 +2,12 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from src.agents.llm_factory import get_llm
 
 def get_critic_agent():
+    """
+    Initialize and return the Critic agent function.
+    
+    The Critic is a Multimodal VLM that reviews execution logs and generated plots
+    to either APPROVE the pipeline quality or REJECT it with feedback.
+    """
     # The Critic needs to be a Multimodal VLM.
     llm = get_llm(agent_type="multimodal", temperature=0.1)
     
@@ -12,10 +18,16 @@ If the quality is acceptable, output 'APPROVE' and synthesize a final manuscript
 
     def invoke_critic(state):
         # We assume state contains 'execution_logs' and 'generated_plots' (list of base64 images)
-        logs = state.get('execution_logs', '')
+        logs = state.get('execution_logs', [])
         plots = state.get('generated_plots', [])
         
-        content = [{"type": "text", "text": f"Execution Logs:\n{logs}\n\nPlease review the attached plots and provide your assessment."}]
+        # Handle log lists from state or strings from tests cleanly
+        if isinstance(logs, list):
+            logs_str = "\n".join(logs)
+        else:
+            logs_str = str(logs)
+            
+        content = [{"type": "text", "text": f"Execution Logs:\n{logs_str}\n\nPlease review the attached plots and provide your assessment."}]
         
         # Attach base64 images
         for img_b64 in plots:

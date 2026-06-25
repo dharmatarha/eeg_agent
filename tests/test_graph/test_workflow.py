@@ -37,6 +37,22 @@ def test_executor_node(mock_get_executor):
     assert result["rag_history"] == []
     assert result["executed_code_blocks"] == []
 
+@patch("src.graph.workflow.get_executor_agent")
+def test_executor_node_accumulates_errors(mock_get_executor):
+    mock_agent = MagicMock()
+    mock_get_executor.return_value = mock_agent
+    
+    mock_tool_message = MagicMock()
+    mock_tool_message.type = "tool"
+    mock_tool_message.content = '{"logs": "Error backtrace", "images": [], "error": true}'
+    
+    mock_agent.invoke.return_value = {"messages": [mock_tool_message]}
+    
+    state = {"analysis_plan": "Do something", "error_count": 2}
+    result = executor_node(state)
+    
+    assert result["error_count"] == 3
+
 @patch("src.graph.workflow.get_critic_agent")
 def test_critic_node_approve(mock_get_critic):
     mock_agent = MagicMock()
