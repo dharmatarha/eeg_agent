@@ -35,7 +35,9 @@ dependencies = [
     "lark",
     "langchain-chroma",
     "docling",
-    "langgraph-checkpoint-sqlite"
+    "langgraph-checkpoint-sqlite",
+    "duckduckgo-search",
+    "ddgs"
 ]
 
 [project.scripts]

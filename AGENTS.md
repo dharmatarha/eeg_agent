@@ -47,6 +47,7 @@ The agents interact with the environment and external knowledge bases using four
 3. **`scientific_rag` (`src/tools/rag_search.py`)**: An offline RAG system powered by ChromaDB. It searches dual collections: scientific neuroimaging methods (including methods sections from EEG papers and textbooks for best-practice processing conventions) and the MNE-Python API documentation (for syntax).
 4. **`dataset_explorer` (`src/tools/dataset_explorer.py`)**: A dataset utility that lists directories recursively matching patterns, reads text configuration files (READMEs, JSON/TSV sidecars) up to size limits, and performs automatic consistency checks across files (validating matching sampling rates, channel counts, and names).
 5. **`stateful_jupyter_exec` (`src/tools/jupyter_exec.py`)**: A WebSocket client that sends code strings to a persistent Dockerized Jupyter Kernel gateway, allowing sequential analysis steps while capturing text outputs, error tracebacks, and Base64 encoded plots.
+6. **`web_search` (`src/tools/web_search.py`)**: A web search utility powered by DuckDuckGo that allows the Executor agent to retrieve API documentation, function syntax, and coding examples for third-party libraries (e.g. pandas, scikit-learn, scipy) and debug sandbox errors.
 
 ---
 

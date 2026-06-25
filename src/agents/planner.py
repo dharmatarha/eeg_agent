@@ -6,6 +6,13 @@ from src.tools.dataset_explorer import dataset_explorer
 from src.agents.llm_factory import get_llm
 
 def get_planner_agent():
+    """
+    Initialize and return the ReAct agent for designing the analysis plan.
+    
+    The Planner agent uses get_llm to create a text LLM and binds
+    metadata_extractor, bids_inspector, scientific_rag, and dataset_explorer tools
+    to inspect dataset characteristics and construct a memory-safe processing blueprint.
+    """
     llm = get_llm(agent_type="text", temperature=0.1)
     
     tools = [metadata_extractor, bids_inspector, scientific_rag, dataset_explorer]
@@ -37,5 +44,5 @@ Your goal is to translate user descriptions into a concrete, technical MNE-Pytho
 Output a structured Markdown "Analysis Plan" detailing the exact steps to be executed. Include any assumptions or RAG-inferred parameters.
 Make sure to indicate when the plan is ready for review."""
 
-    return create_react_agent(llm, tools, state_modifier=system_prompt)
+    return create_react_agent(llm, tools, prompt=system_prompt)
 

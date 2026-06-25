@@ -3,7 +3,7 @@ Sandbox Verification Utility for EEG-ADK Multi-Agent System
 
 This script verifies connection to the stateful Docker Jupyter Sandbox.
 It executes a test snippet inside the container, imports the installed
-EEG-related libraries (MNE-Python, PyPrep, Autoreject), and verifies
+EEG-related libraries (MNE-Python, MNE-Bids), and verifies
 that host GPU acceleration is available inside the container via nvidia-smi.
 """
 
@@ -30,13 +30,9 @@ def main():
     code = """
 import sys
 import mne
-import pyprep
-import autoreject
 
 print("Python version:", sys.version)
 print("MNE version:", mne.__version__)
-print("PyPrep version:", pyprep.__version__)
-print("Autoreject version:", autoreject.__version__)
 
 # Verify GPU availability using nvidia-smi command inside container
 import subprocess

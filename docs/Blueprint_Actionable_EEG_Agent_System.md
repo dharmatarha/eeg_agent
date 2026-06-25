@@ -172,7 +172,7 @@ This configuration uses the MATLAB Runtime (MCR) to run compiled EEGLAB and MNE-
 `# Install Python Neuroimaging Stack`  
 `RUN pip3 install --upgrade pip`  
 `RUN pip3 install \`  
-    `mne mne-bids mne-connectivity autoreject pyprep \`  
+    `mne mne-bids mne-connectivity \`  
     `scikit-learn pandas matplotlib vllm jupyter_client`
 
 ### **vLLM Backend Configuration**
