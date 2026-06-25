@@ -1,3 +1,12 @@
+"""
+RAG Ingestion Pipeline for EEG-ADK Multi-Agent System
+
+This script parses and ingests various document formats (scientific articles, textbooks,
+and Python API documentation) into ChromaDB collections. It implements layout-aware chunking
+via Docling (with standard text fallback), summary generation, and hierarchical indexing
+(ParentDocumentRetriever) for API reference docs.
+"""
+
 import os
 import sys
 import uuid
@@ -24,6 +33,16 @@ from src import config
 logger = logging.getLogger("eeg_agent.ingest")
 
 def generate_summary(doc_text: str, llm) -> str:
+    """
+    Generate a concise summary of methods and parameters in the document using an LLM.
+
+    Args:
+        doc_text (str): The text content to summarize.
+        llm: The initialized language model instance.
+
+    Returns:
+        str: The generated text summary.
+    """
     prompt = PromptTemplate.from_template(
         "Please provide a concise but comprehensive summary of the methodologies, parameters, and key findings in the following scientific paper excerpt:\n\n{text}\n\nSummary:"
     )
@@ -47,6 +66,20 @@ def generate_summary(doc_text: str, llm) -> str:
 
 
 def ingest_scientific_papers(articles_dir, db_dir, embeddings, llm, force=False):
+    """
+    Ingest scientific papers into the neuroimage_methods Chroma collection.
+
+    Attempts to use Docling layout-aware chunking for paragraph and section level splits,
+    generating an LLM summary of the article's methodologies, and falls back to standard
+    PyPDFLoader + RecursiveCharacterTextSplitter on parser failure.
+
+    Args:
+        articles_dir (str): Directory containing scientific paper PDFs.
+        db_dir (str): Directory where the ChromaDB files are persisted.
+        embeddings: The embedding model instance.
+        llm: The language model instance (used for generating paper summaries).
+        force (bool): If True, re-ingest already processed papers. Defaults to False.
+    """
     logger.info("Processing Scientific Papers (PDF)...")
     if not os.path.exists(articles_dir):
         logger.warning("Articles directory '%s' does not exist.", articles_dir)
@@ -185,6 +218,18 @@ def ingest_scientific_papers(articles_dir, db_dir, embeddings, llm, force=False)
 
 
 def ingest_books(books_dir, db_dir, embeddings, force=False):
+    """
+    Ingest textbook reference materials into the neuroimage_methods Chroma collection.
+
+    Splits PDF book documents at section boundaries using Docling layout-aware parsing,
+    with a fallback to standard PyPDFLoader + RecursiveCharacterTextSplitter.
+
+    Args:
+        books_dir (str): Directory containing reference book PDFs.
+        db_dir (str): Directory where the ChromaDB files are persisted.
+        embeddings: The embedding model instance.
+        force (bool): If True, re-ingest already processed books. Defaults to False.
+    """
     logger.info("Processing Books (PDF)...")
     if not os.path.exists(books_dir):
         logger.warning("Books directory '%s' does not exist.", books_dir)
@@ -314,6 +359,19 @@ def ingest_books(books_dir, db_dir, embeddings, force=False):
 
 
 def ingest_api_docs(api_docs_dir, db_dir, embeddings, force=False):
+    """
+    Ingest Python API documentation using a hierarchical (Parent-Child) indexing strategy.
+
+    Splits scraped API documentation pages (TXT/MD) into parent and child chunks. Only the
+    child chunks are embedded in the neuroimage_api Chroma collection, while the full parent
+    chunks are stored in a local key-value document store.
+
+    Args:
+        api_docs_dir (str): Directory containing text/markdown documentation files.
+        db_dir (str): Directory where the ChromaDB files are persisted.
+        embeddings: The embedding model instance.
+        force (bool): If True, re-ingest already processed API documents. Defaults to False.
+    """
     logger.info("Processing API Documentation (TXT/MD)...")
     if not os.path.exists(api_docs_dir):
         logger.warning("API docs directory '%s' does not exist.", api_docs_dir)
@@ -400,6 +458,12 @@ def ingest_api_docs(api_docs_dir, db_dir, embeddings, force=False):
 
 
 def main():
+    """
+    Main entry point for the RAG ingestion pipeline.
+
+    Loads environment variables, initializes LLMs/embeddings, parses command line flags,
+    and runs document ingestion for the specified categories.
+    """
     load_dotenv(override=True)
     setup_logging()
     

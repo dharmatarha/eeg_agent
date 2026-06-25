@@ -42,10 +42,11 @@ The system delegates specialized tasks to three primary agents, each configured 
 
 The agents interact with the environment and external knowledge bases using four specialized tools:
 
-1. **`metadata_extractor` (`src/tools/metadata_extractor.py`)**: A fast microservice that peeks into EEG file headers (like `.fif` or `.set`) to extract critical dimensions without loading large binary arrays.
+1. **`metadata_extractor` (`src/tools/metadata_extractor.py`)**: A fast utility that peeks into raw EEG file headers (supporting `.fif`, `.set`, `.edf`, `.bdf`, `.vhdr`) to extract critical dimensions, classify channel types (EEG vs EOG vs Stimulus), and extract normalized events/annotations without loading large binary arrays.
 2. **`bids_inspector` (`src/tools/bids_inspector.py`)**: A directory-scanning microservice that parses BIDS dataset formats (`dataset_description.json`, `sub-*` folders), extracts subject lists, and captures representative EEG headers.
-3. **`scientific_rag` (`src/tools/rag_search.py`)**: An offline RAG system powered by ChromaDB. It searches dual collections: scientific neuroimaging methods (for parameters) and the MNE-Python API documentation (for syntax).
-4. **`stateful_jupyter_exec` (`src/tools/jupyter_exec.py`)**: A WebSocket client that sends code strings to a persistent Dockerized Jupyter Kernel gateway, allowing sequential analysis steps while capturing text outputs, error tracebacks, and Base64 encoded plots.
+3. **`scientific_rag` (`src/tools/rag_search.py`)**: An offline RAG system powered by ChromaDB. It searches dual collections: scientific neuroimaging methods (including methods sections from EEG papers and textbooks for best-practice processing conventions) and the MNE-Python API documentation (for syntax).
+4. **`dataset_explorer` (`src/tools/dataset_explorer.py`)**: A dataset utility that lists directories recursively matching patterns, reads text configuration files (READMEs, JSON/TSV sidecars) up to size limits, and performs automatic consistency checks across files (validating matching sampling rates, channel counts, and names).
+5. **`stateful_jupyter_exec` (`src/tools/jupyter_exec.py`)**: A WebSocket client that sends code strings to a persistent Dockerized Jupyter Kernel gateway, allowing sequential analysis steps while capturing text outputs, error tracebacks, and Base64 encoded plots.
 
 ---
 

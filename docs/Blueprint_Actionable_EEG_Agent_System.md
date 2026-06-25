@@ -130,6 +130,14 @@ The practical deployment of the system follows a **Human-in-the-Loop (HITL)** st
 
 **Deployment Strategy:** Docker Containerization with vLLM Backend (License-Free Approach)
 
+### **Local Packaging & CLI Configuration**
+To configure proper package resolution and install CLI scripts, perform a local editable installation:
+```bash
+pip install -e .
+```
+This registers the executable script `eeg-agent` to boot the orchestrator.
+
+
 ### **License-Free Docker Sandbox (Dockerfile)**
 
 This configuration uses the MATLAB Runtime (MCR) to run compiled EEGLAB and MNE-Python for modern processing.  
@@ -178,4 +186,4 @@ To run the agent logic locally using vLLM with high context support to ensure it
 
 ### **Workflow Governance**
 
-* **Read-Only Data:** Mount your EEG data as read-only (-v /mnt/data:/data:ro). All outputs should go to a separate /output directory.
+* **Read-Only Data:** Mount your EEG data as read-only. The host path is defined dynamically via the `EEG_DATA_DIR` environment variable, which defaults to `./data` and maps to `/mnt/data:ro` in the sandbox container. All outputs should go to a separate `/output` directory.

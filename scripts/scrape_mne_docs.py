@@ -160,6 +160,12 @@ def scrape_page(url, output_dir):
         return url, False, f"File Write Error: {e}"
 
 def main():
+    """
+    Main entry point for scraping MNE-Python stable documentation.
+
+    Parses CLI arguments, initializes logging, harvests URLs matching MNE patterns
+    from seed pages, and crawls pages concurrently using ThreadPoolExecutor.
+    """
     load_dotenv(override=True)
     setup_logging()
     
