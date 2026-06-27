@@ -22,11 +22,9 @@ CRITICAL CHECKS:
    - In multi-subject loops, the code must manage memory aggressively (using `gc.collect()`, `plt.close('all')`, and saving intermediate files to `/output/`).
 3. **Library & Dependency Auditing:**
    - Ensure the code only uses supported libraries (`mne`, `mne-bids`, `mne-connectivity`, etc.).
-   - Explicitly REJECT any code that attempts to import `pyprep` or `autoreject` (which are uninstalled and deprecated).
 4. **Signal-to-Noise Ratio (SNR) & Artifacts:**
    - Review execution logs and visual plots (e.g. ERPs, PSD, Topomaps, connectivity matrices) for poor signal quality.
-   - Look for persistent ocular (eye-blinks), cardiac, or muscle artifacts that should have been removed or mitigated (e.g., using ICA or SSP).
-   - Ensure bad channels are properly marked and interpolated.
+   - Look for persistent ocular (eye-blinks), cardiac, or muscle artifacts, and bad channels that should have been removed or mitigated (e.g., using ICA or SSP). Compare your findings to the user's request and the planned analysis steps.
 
 VERDICT RULES:
 - If any critical checks fail, or if artifacts/errors persist in the logs or plots, you MUST start your response with the word 'REJECT' followed by detailed, actionable feedback.

@@ -127,9 +127,34 @@ def main():
     final_state = None
     for event in app.stream(None, config=config):
         for k, v in event.items():
-            logger.info("Node completed: %s", k.upper())
-            if "critic_feedback" in v:
-                print(f"\nCritic Feedback:\n{v['critic_feedback']}")
+            if k == "executor":
+                print("\n" + "="*40)
+                print("         EXECUTOR ACTION")
+                print("="*40)
+                code_blocks = v.get("executed_code_blocks", [])
+                plots = v.get("generated_plots", [])
+                
+                print(f"Executed {len(code_blocks)} code block(s) in sandbox.")
+                for idx, block in enumerate(code_blocks):
+                    status = "❌ Failed" if block.get("error", False) else "✅ Succeeded"
+                    print(f"\n--- Code Block {idx + 1} ({status}) ---")
+                    print(block.get("code", "").strip())
+                    if block.get("error", False):
+                        print(f"\nError logs:\n{block.get('logs', '').strip()}")
+                print(f"\nGenerated {len(plots)} plot(s).")
+                print("="*40 + "\n")
+                
+            elif k == "critic":
+                print("\n" + "="*40)
+                print("         CRITIC REVIEW")
+                print("="*40)
+                feedback = v.get("critic_feedback", "")
+                is_approved = "APPROVE" in feedback.upper()
+                verdict = "✅ APPROVED" if is_approved else "❌ REJECTED"
+                print(f"Verdict: {verdict}")
+                print(f"\nFeedback:\n{feedback}")
+                print("="*40 + "\n")
+                
         final_state = event
         
     print("\n=== Workflow Completed ===")
