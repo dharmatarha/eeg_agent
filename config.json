@@ -4,8 +4,8 @@
   "vllm_api_base": "http://localhost:8000/v1",
   "vllm_api_key": "EMPTY",
   "vllm_model": "Qwen/Qwen3-8B",
-  "embedding_provider": "local",
-  "embedding_model": "Qwen/Qwen3-Embedding-4B",
+  "embedding_provider": "gemini",
+  "embedding_model": "models/gemini-embedding-001",
   "ingestion": {
     "articles": {
       "chunk_size": 2000,

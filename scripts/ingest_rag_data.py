@@ -13,6 +13,7 @@ import uuid
 import argparse
 import logging
 import hashlib
+import time
 from dotenv import load_dotenv
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -213,7 +214,33 @@ def ingest_scientific_papers(articles_dir, db_dir, embeddings, llm, force=False)
             
         # Assign deterministic IDs to prevent duplicates
         ids = [f"{file_basename}_chunk_{i}" for i in range(len(chunks))]
-        vector_store.add_documents(chunks, ids=ids)
+        
+        # Batch and add to vectorstore with retry logic to avoid rate limits
+        batch_size = 200
+        for start_idx in range(0, len(chunks), batch_size):
+            end_idx = min(start_idx + batch_size, len(chunks))
+            batch_chunks = chunks[start_idx:end_idx]
+            batch_ids = ids[start_idx:end_idx]
+            
+            max_retries = 5
+            for attempt in range(max_retries):
+                try:
+                    vector_store.add_documents(batch_chunks, ids=batch_ids)
+                    break
+                except Exception as e:
+                    if "RESOURCE_EXHAUSTED" in str(e) or "429" in str(e):
+                        if attempt == max_retries - 1:
+                            raise e
+                        sleep_time = 45
+                        logger.warning(
+                            "Rate limit hit (429 RESOURCE_EXHAUSTED). Sleeping for %d seconds before retry (Attempt %d/%d)...",
+                            sleep_time, attempt + 1, max_retries
+                        )
+                        time.sleep(sleep_time)
+                    else:
+                        raise e
+            if end_idx < len(chunks):
+                time.sleep(2)
         logger.info("Successfully added %d chunks for %s.", len(chunks), file_basename)
 
 
@@ -353,7 +380,33 @@ def ingest_books(books_dir, db_dir, embeddings, force=False):
 
         # Assign deterministic IDs to prevent duplicates
         ids = [f"{file_basename}_chunk_{i}" for i in range(len(chunks))]
-        vector_store.add_documents(chunks, ids=ids)
+        
+        # Batch and add to vectorstore with retry logic to avoid rate limits
+        batch_size = 200
+        for start_idx in range(0, len(chunks), batch_size):
+            end_idx = min(start_idx + batch_size, len(chunks))
+            batch_chunks = chunks[start_idx:end_idx]
+            batch_ids = ids[start_idx:end_idx]
+            
+            max_retries = 5
+            for attempt in range(max_retries):
+                try:
+                    vector_store.add_documents(batch_chunks, ids=batch_ids)
+                    break
+                except Exception as e:
+                    if "RESOURCE_EXHAUSTED" in str(e) or "429" in str(e):
+                        if attempt == max_retries - 1:
+                            raise e
+                        sleep_time = 45
+                        logger.warning(
+                            "Rate limit hit (429 RESOURCE_EXHAUSTED). Sleeping for %d seconds before retry (Attempt %d/%d)...",
+                            sleep_time, attempt + 1, max_retries
+                        )
+                        time.sleep(sleep_time)
+                    else:
+                        raise e
+            if end_idx < len(chunks):
+                time.sleep(2)
         logger.info("Successfully added %d chunks for book %s.", len(chunks), file_basename)
 
 
@@ -445,13 +498,37 @@ def ingest_api_docs(api_docs_dir, db_dir, embeddings, force=False):
 
     if filtered_docs:
         logger.info("Ingesting %d new parent document chunks in batches...", len(filtered_docs))
-        batch_size = 500
+        # Use an optimized batch size (200) and sleep 2 seconds to avoid rate limits while remaining fast
+        batch_size = 200
         for start_idx in range(0, len(filtered_docs), batch_size):
             end_idx = min(start_idx + batch_size, len(filtered_docs))
             batch_docs = filtered_docs[start_idx:end_idx]
             batch_ids = ids[start_idx:end_idx]
             logger.info("Ingesting parent documents batch [%d-%d/%d]...", start_idx, end_idx, len(filtered_docs))
-            retriever.add_documents(batch_docs, ids=batch_ids)
+            
+            # Wrap in retry loop to handle 429 RESOURCE_EXHAUSTED errors
+            max_retries = 5
+            for attempt in range(max_retries):
+                try:
+                    retriever.add_documents(batch_docs, ids=batch_ids)
+                    break
+                except Exception as e:
+                    if "RESOURCE_EXHAUSTED" in str(e) or "429" in str(e):
+                        if attempt == max_retries - 1:
+                            raise e
+                        sleep_time = 45
+                        logger.warning(
+                            "Rate limit hit (429 RESOURCE_EXHAUSTED). Sleeping for %d seconds before retry (Attempt %d/%d)...",
+                            sleep_time, attempt + 1, max_retries
+                        )
+                        time.sleep(sleep_time)
+                    else:
+                        raise e
+            
+            # Sleep if there are more batches remaining to stay well within the Rate Limits
+            if end_idx < len(filtered_docs):
+                logger.info("Sleeping for 2 seconds to avoid API rate limits...")
+                time.sleep(2)
         logger.info("Successfully added %d new API document chunks using Hierarchical Indexing.", len(filtered_docs))
     else:
         logger.info("All API documents are already ingested.")

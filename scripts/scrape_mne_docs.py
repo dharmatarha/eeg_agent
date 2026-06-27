@@ -108,6 +108,9 @@ def scrape_page(url, output_dir):
         prefix = "mne_bids_"
         if "/generated/" in url:
             filename = prefix + "api_" + url.split('/')[-1].replace('.html', '.txt')
+        elif "/auto_examples/" in url:
+            parts = url.split('/auto_examples/')[-1].split('/')
+            filename = prefix + "example_" + "_".join(parts).replace('.html', '.txt')
         else:
             filename = prefix + "doc_" + url.split('/')[-1].replace('.html', '.txt')
     elif "mne-connectivity/stable" in url:
@@ -200,7 +203,15 @@ def main():
     mne_bids_api_links = get_links(mne_bids_api_seed, is_mne_bids_api)
     logger.info("Found %d MNE-BIDS API pages.", len(mne_bids_api_links))
     all_urls.update(mne_bids_api_links)
-    all_urls.add("https://mne.tools/mne-bids/stable/use.html")
+    
+    # Gather MNE-BIDS core examples from use.html
+    mne_bids_use_seed = "https://mne.tools/mne-bids/stable/use.html"
+    is_mne_bids_ex = lambda u: u.startswith("https://mne.tools/mne-bids/stable/auto_examples/") and u.endswith(".html")
+    mne_bids_ex_links = get_links(mne_bids_use_seed, is_mne_bids_ex)
+    logger.info("Found %d MNE-BIDS example pages.", len(mne_bids_ex_links))
+    all_urls.update(mne_bids_ex_links)
+    
+    all_urls.add(mne_bids_use_seed)
     all_urls.add(mne_bids_api_seed)
 
     # 3. Gather MNE-Connectivity Links
