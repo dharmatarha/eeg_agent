@@ -230,6 +230,27 @@ eeg-agent
 3. **Approve/Edit:** Press `ENTER` to approve the plan and pass it to the Executor, or type corrective feedback to dynamically adjust the pipeline.
 4. **Execution, Session Persistence & Final Audit:** The Executor will run the code in the Docker sandbox, and the Critic will review the output plots. Session checkpoints are persistently saved to `logs/checkpoints.sqlite`. Upon run completion, the system automatically compiles all successful code blocks into a standalone, reproducible python script (`output/analysis_pipeline.py`) and generates a detailed audit report (`output/final_report.md`) containing the metadata, RAG retrieval audit log, sandbox code execution traces, and critic QA reviews.
 
+### 4. Inspecting Past Runs
+You can inspect the state and details of past runs using the run-inspection utility. This tool queries the persistent database (`logs/checkpoints.sqlite`) to show user directives, metadata, analysis plans, executed code blocks, and critic verdicts.
+
+* **List all past runs:**
+  ```bash
+  python scripts/inspect_run.py --list
+  ```
+* **Inspect a specific run (interactive selection):**
+  ```bash
+  python scripts/inspect_run.py
+  ```
+* **Inspect a specific run by its Thread ID (non-interactive):**
+  ```bash
+  python scripts/inspect_run.py -t <thread_id>
+  ```
+* **Show the full analysis plan for a run:**
+  ```bash
+  python scripts/inspect_run.py -t <thread_id> --show-plan
+  ```
+
+
 
 ---
 

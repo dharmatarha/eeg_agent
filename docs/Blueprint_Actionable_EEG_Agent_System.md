@@ -125,6 +125,7 @@ The practical deployment of the system follows a **Human-in-the-Loop (HITL)** st
 
 * Upon Critic approval, the graph consolidates all actions into a final data package.  
 * The researcher receives processed datasets, statistical CSVs, high-fidelity plots, a standalone compiled Python script (`output/analysis_pipeline.py`), and a comprehensive audit report (`output/final_report.md`) detailing the user directive, file metadata, RAG retrieval audit log, sandbox code execution traces, and critic QA feedback.
+* Past and active runs can be inspected at any time using the `scripts/inspect_run.py` utility, which provides non-interactive summaries (via `-t <thread_id>`), lists all stored runs (`--list`), or guides the user through interactive selection and plan expansion (`--show-plan`).
 
 ## **9\. Technical Setup Guide: EEG-ADK Local Environment**
 

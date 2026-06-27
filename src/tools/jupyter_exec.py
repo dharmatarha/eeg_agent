@@ -5,6 +5,7 @@ import websocket
 import uuid
 import os
 import logging
+import time
 from langchain_core.tools import tool
 
 logger = logging.getLogger("eeg_agent.tools.jupyter_exec")
@@ -69,10 +70,24 @@ def stateful_jupyter_exec(code_string: str) -> str:
         
     logger.debug("Connecting to WebSocket gateway at %s...", WS_GATEWAY_URL)
     try:
+        # Set socket connection timeout to 60 seconds
         ws = websocket.create_connection(ws_url, timeout=60)
     except Exception as e:
         logger.error("WebSocket connection failed: %s", e)
         return json.dumps({"logs": f"WebSocket connection failed: {e}", "error": True, "images": []})
+    
+    # Configure total execution timeout
+    execution_timeout = config.get_val("sandbox.timeout", "SANDBOX_TIMEOUT")
+    if execution_timeout is None:
+        execution_timeout = 300.0
+    else:
+        try:
+            execution_timeout = float(execution_timeout)
+        except ValueError:
+            execution_timeout = 300.0
+            
+    # Set short read timeout to prevent blocking indefinitely when receiving heartbeats/status messages
+    ws.settimeout(5.0)
     
     msg_id = uuid.uuid4().hex
     msg = {
@@ -102,9 +117,25 @@ def stateful_jupyter_exec(code_string: str) -> str:
     error_occurred = False
     
     logger.debug("Awaiting execution reply and outputs from kernel...")
+    start_time = time.time()
     while True:
         try:
-            rsp = json.loads(ws.recv())
+            # Check if total execution time limit is exceeded
+            elapsed = time.time() - start_time
+            if elapsed > execution_timeout:
+                logger.error("Jupyter sandbox execution exceeded total timeout limit of %ss.", execution_timeout)
+                outputs.append(f"\nExecution timed out (exceeded total limit of {execution_timeout}s).")
+                error_occurred = True
+                break
+                
+            try:
+                rsp_raw = ws.recv()
+                rsp = json.loads(rsp_raw)
+            except websocket.WebSocketTimeoutException:
+                # Socket timed out but total execution limit not reached yet.
+                # Continue loop to check elapsed time and wait again.
+                continue
+                
             msg_type = rsp["header"]["msg_type"]
             parent_id = rsp["parent_header"].get("msg_id")
             
@@ -129,11 +160,6 @@ def stateful_jupyter_exec(code_string: str) -> str:
                 if rsp["content"]["status"] == "error":
                     error_occurred = True
                 break
-        except websocket.WebSocketTimeoutException:
-            logger.error("Jupyter sandbox execution timed out (limit: 60s).")
-            outputs.append("\nExecution timed out.")
-            error_occurred = True
-            break
         except Exception as e:
             logger.error("Jupyter sandbox communication error: %s", e)
             outputs.append(f"\nWebSocket Error: {e}")

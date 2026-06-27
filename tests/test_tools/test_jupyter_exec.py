@@ -103,3 +103,26 @@ def test_stateful_jupyter_exec_error(mock_create_connection, mock_get_kernel):
         
         assert "Traceback line 1\nTraceback line 2" in result["logs"]
         assert result["error"] is True
+
+@patch("src.tools.jupyter_exec.get_or_create_kernel")
+@patch("websocket.create_connection")
+@patch("src.config.get_val")
+def test_stateful_jupyter_exec_timeout(mock_get_config, mock_create_connection, mock_get_kernel):
+    mock_get_kernel.return_value = "fake-kernel-id"
+    mock_get_config.side_effect = lambda key, default=None: 0.01 if key == "sandbox.timeout" else default
+    
+    mock_ws = MagicMock()
+    mock_create_connection.return_value = mock_ws
+    
+    with patch("uuid.uuid4") as mock_uuid:
+        mock_uuid.return_value.hex = "test-msg-id"
+        
+        # Simulate websocket timeout exception
+        mock_ws.recv.side_effect = websocket.WebSocketTimeoutException("Timeout")
+        
+        result_json = stateful_jupyter_exec.invoke("print('slow')")
+        result = json.loads(result_json)
+        
+        assert "timed out" in result["logs"]
+        assert result["error"] is True
+

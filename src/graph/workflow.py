@@ -164,7 +164,7 @@ def critic_router(state: AgentState):
         logger.info("Critic Router: Rejected. Routing back to Executor Node.")
         return "executor"
 
-def build_workflow():
+def build_workflow(checkpointer=None):
     logger.info("Building StateGraph workflow...")
     workflow = StateGraph(AgentState)
     
@@ -183,13 +183,15 @@ def build_workflow():
         END: END
     })
     
-    # Setup persistent SQLite checkpoints
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    logs_dir = os.path.join(project_root, "logs")
-    os.makedirs(logs_dir, exist_ok=True)
-    db_path = os.path.join(logs_dir, "checkpoints.sqlite")
-    
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    memory = SqliteSaver(conn)
-    return workflow.compile(interrupt_before=["executor"], checkpointer=memory)
+    if checkpointer is None:
+        # Setup persistent SQLite checkpoints
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        logs_dir = os.path.join(project_root, "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        db_path = os.path.join(logs_dir, "checkpoints.sqlite")
+        
+        conn = sqlite3.connect(db_path, check_same_thread=False)
+        checkpointer = SqliteSaver(conn)
+        
+    return workflow.compile(interrupt_before=["executor"], checkpointer=checkpointer)
 

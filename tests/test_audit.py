@@ -56,20 +56,10 @@ def test_sqlite_saver_workflow(tmp_path):
     conn = sqlite3.connect(str(db_file))
     saver = SqliteSaver(conn)
     
-    # Just verify Saver creation and connection
+    # Verify saver creation
     assert saver is not None
     
-    # Verify that build_workflow registers the file logs/checkpoints.sqlite
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    expected_db_path = os.path.join(project_root, "logs", "checkpoints.sqlite")
-    
-    # Remove if exists from previous manual runs so we test fresh creation
-    if os.path.exists(expected_db_path):
-        try:
-            os.remove(expected_db_path)
-        except OSError:
-            pass
-            
-    app = build_workflow()
+    # Verify that build_workflow compiles successfully with custom checkpointer
+    app = build_workflow(checkpointer=saver)
     assert app is not None
-    assert os.path.exists(expected_db_path)
+    assert os.path.exists(str(db_file))

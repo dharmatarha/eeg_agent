@@ -11,6 +11,11 @@ services:
     environment:
       - JUPYTER_TOKEN=eeg_adk_sandbox_token
     # Note: ensure that vLLM is running either locally or inside this docker network
+    deploy:
+      resources:
+        limits:
+          memory: 24g
+
 
   # Vector Database for RAG
   chromadb:
