@@ -27,7 +27,7 @@ Simple sequential agent communication is insufficient and prone to infinite loop
 | :---- | :---- | :---- |
 | **Lead Planner (Strategist)** | Neuroinformatics & Workflow Design | Translates user methods into a technical pipeline; halts for user approval before execution; uses offline RAG to infer missing parameters. |
 | **Executor (Programmer)** | Code Generation & Execution | Writes MNE-Python scripts; operates within a Stateful Jupyter Sandbox; implements memory-safe loading; self-corrects based on error logs. |
-| **Critic (Reviewer)** | Quality Assurance & Reporting (VLM) | Must be a Multimodal Vision-Language Model. Validates Base64 plots for SNR and anomalies (e.g., eye-blinks); synthesizes final Methods and Results. |
+| **Critic (Reviewer)** | Quality Assurance & Reviewer (VLM) | Must be a Multimodal Vision-Language Model. Reviews user directive, plan, code, logs, and plots. Validates results against the plan, checks memory-safety constraints, audits libraries, and inspects plots for SNR/artifacts; synthesizes Methods and Results. |
 
 ## **4\. Refined Tool Specifications (Local & Realistic)**
 

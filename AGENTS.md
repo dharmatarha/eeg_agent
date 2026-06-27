@@ -28,13 +28,18 @@ The system delegates specialized tasks to three primary agents, each configured 
   - Recursively debugs and self-corrects: If an execution returns an error traceback, it analyzes the error and rewrites the logic autonomously.
 
 ### 👁️ Critic (Reviewer & QA)
-- **Role:** Quality Assurance & Reporting
+- **Role:** Quality Assurance & Reviewer
 - **Source File:** `src/agents/critic.py`
-- **Core Function:** Acts as a Vision-Language Model (VLM) reviewer that validates the Executor's outputs.
+- **Core Function:** Acts as a Multimodal Vision-Language Model (VLM) reviewer that validates the Executor's results, code correctness, and plan adherence.
 - **Key Behaviors:**
-  - Reads execution logs and visually inspects generated Base64 plots (e.g., ERPs, Topomaps) for Signal-to-Noise Ratio (SNR) and anomalies (like persistent eye-blinks).
-  - Returns `REJECT` alongside feedback if artifacts remain, demanding the Executor rerun the pipeline with tightened thresholds.
-  - Returns `APPROVE` when acceptable, synthesizing a final, manuscript-ready Methods & Results section based exactly on the executed script.
+  - Reviews the original `user_directive`, the `analysis_plan`, the exact `executed_code_blocks`, the `execution_logs`, and visually inspects generated Base64 plots.
+  - Performs critical checks:
+    - **Adherence to Plan:** Ensures the executed code conforms to the planned methodology.
+    - **Memory Safety & Sandbox constraints:** Checks that `preload=False`, `MNE_MEMMAP_MIN_SIZE` configuration, and loop-level memory management (`gc.collect()`, Matplotlib closure) are followed.
+    - **Library Auditing:** Audits imports to ensure only supported libraries (`mne`, `mne-bids`, `mne-connectivity`) are used.
+    - **SNR & Artifact Validation:** Audits plots for ocular, muscle, and bad-channel artifacts.
+  - Returns `REJECT` alongside detailed feedback if any code checks fail or artifacts remain, routing control back to the Executor.
+  - Returns `APPROVE` when acceptable, synthesizing a final, manuscript-ready Methods & Results section based on the actual executed code.
 
 ---
 
