@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   sandbox:
     build:
@@ -10,14 +8,6 @@ services:
     volumes:
       - ${EEG_DATA_DIR:-../data}:/mnt/data:ro
       - ../output:/output
-      - ../workspace:/workspace
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     environment:
       - JUPYTER_TOKEN=eeg_adk_sandbox_token
     # Note: ensure that vLLM is running either locally or inside this docker network

@@ -140,12 +140,9 @@ This registers the executable script `eeg-agent` to boot the orchestrator.
 
 ### **License-Free Docker Sandbox (Dockerfile)**
 
-This configuration uses the MATLAB Runtime (MCR) to run compiled EEGLAB and MNE-Python for modern processing.  
+This configuration sets up the MNE-Python, MNE-BIDS, and MNE-Connectivity stack inside an isolated container:  
 `# Use NVIDIA CUDA base for GPU acceleration`  
 `FROM nvidia/cuda:12.1.1-devel-ubuntu22.04`
-
-`# Agree to MATLAB Runtime License`  
-`ENV AGREE_TO_MATLAB_RUNTIME_LICENSE=yes`
 
 `# Install System Dependencies`  
 `RUN apt-get update && apt-get install -y \`  
@@ -153,27 +150,12 @@ This configuration uses the MATLAB Runtime (MCR) to run compiled EEGLAB and MNE-
     `libgl1-mesa-glx libqt5gui5 \`  
     `&& rm -rf /var/lib/apt/lists/*`
 
-`# Install MATLAB Runtime (MCR) R2024a`  
-`RUN mkdir /mcr_install && \`  
-    `cd /mcr_install && \`  
-    `wget https://ssd.mathworks.com/supportfiles/downloads/R2024a/Release/0/deployment_files/installer/complete/glnxa64/MATLAB_Runtime_R2024a_glnxa64.zip && \`  
-    `unzip MATLAB_Runtime_R2024a_glnxa64.zip && \`  
-    `./install -mode silent -agreeToLicense yes && \`  
-    `cd / && rm -rf /mcr_install`
-
-`# Install Compiled EEGLAB`  
-`RUN mkdir /opt/eeglab && \`  
-    `wget https://sccn.ucsd.edu/eeglab/download/eeglab_compiled.zip && \`  
-    `unzip eeglab_compiled.zip -d /opt/eeglab`
-
-`# Set Environment Variables for MCR`  
-`ENV LD_LIBRARY_PATH="/usr/local/MATLAB/MATLAB_Runtime/v241/runtime/glnxa64:/usr/local/MATLAB/MATLAB_Runtime/v241/bin/glnxa64:/usr/local/MATLAB/MATLAB_Runtime/v241/sys/os/glnxa64:/usr/local/MATLAB/MATLAB_Runtime/v241/extern/bin/glnxa64"`
-
 `# Install Python Neuroimaging Stack`  
 `RUN pip3 install --upgrade pip`  
 `RUN pip3 install \`  
-    `mne mne-bids mne-connectivity \`  
-    `scikit-learn pandas matplotlib vllm jupyter_client`
+    `mne mne-bids mne-connectivity mne-bids-pipeline \`  
+    `scikit-learn pandas matplotlib jupyter_client \`  
+    `jupyter_kernel_gateway`
 
 ### **vLLM Backend Configuration**
 

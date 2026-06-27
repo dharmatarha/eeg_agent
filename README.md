@@ -81,7 +81,7 @@ graph TD
 
 - **Python 3.10+**
 - **Docker** & **Docker Compose**
-- **NVIDIA GPU** (Recommended for local LLMs and rapid EEG processing)
+- **NVIDIA GPU** (Optional; recommended for running local open-source LLMs/VLMs via vLLM or training deep learning classifiers. Runs out-of-the-box on CPU when using cloud API backends like Google Gemini).
 - Local EEG Data files (e.g., `.fif`, `.set`, `.vhdr`)
 
 ---
@@ -178,12 +178,18 @@ VLLM_API_KEY=your_vllm_key_here
 Any variables set in the `.env` file (or exported to the shell environment) will take precedence over `config.json` values to allow seamless override control.
 
 ### 3. Start the Docker Sandbox
-The Executor agent requires the isolated Docker container to safely execute generated MNE/EEGLAB code without crashing your host machine.
-```bash
-cd docker
-docker-compose up -d --build
-```
-*Note: This image includes MATLAB Runtime, EEGLAB, and MNE-Python, so the initial build may take some time.*
+The Executor agent requires the isolated Docker container to safely execute generated MNE-Python code.
+
+* **To run on CPU (Default):**
+  ```bash
+  cd docker
+  docker-compose up -d --build
+  ```
+* **To run with GPU acceleration (Recommended if NVIDIA Container Toolkit is installed):**
+  ```bash
+  cd docker
+  docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+  ```
 
 ### 4. Prepare the Knowledge Base (RAG)
 For the Planner and Executor agents to intelligently infer standard EEG parameters and use the MNE API correctly, you should populate the Vector Database:
