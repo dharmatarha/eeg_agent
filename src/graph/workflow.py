@@ -56,6 +56,20 @@ def extract_tool_trace(messages):
                 
     return rag_history, executed_code_blocks
 
+def normalize_content(content) -> str:
+    """Normalize message content to a clean string, resolving lists of blocks."""
+    if isinstance(content, str):
+        return content
+    elif isinstance(content, list):
+        text_parts = []
+        for part in content:
+            if isinstance(part, str):
+                text_parts.append(part)
+            elif isinstance(part, dict) and "text" in part:
+                text_parts.append(part["text"])
+        return "".join(text_parts)
+    return str(content)
+
 def planner_node(state: AgentState):
     logger.info("Planner Node: Starting plan generation...")
     planner = get_planner_agent()
@@ -69,7 +83,7 @@ def planner_node(state: AgentState):
     rag_history, _ = extract_tool_trace(result["messages"])
     
     return {
-        "analysis_plan": final_message,
+        "analysis_plan": normalize_content(final_message),
         "rag_history": rag_history
     }
 
@@ -123,7 +137,7 @@ def executor_node(state: AgentState):
 def critic_node(state: AgentState):
     logger.info("Critic Node: Invoking QA / review agent...")
     critic = get_critic_agent()
-    feedback = critic(state)
+    feedback = normalize_content(critic(state))
     
     is_approved = "APPROVE" in feedback.upper()
     logger.info("Critic Node: QA completed. Approved=%s.", is_approved)

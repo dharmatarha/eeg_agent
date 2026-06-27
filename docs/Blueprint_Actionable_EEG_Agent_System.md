@@ -155,7 +155,10 @@ This configuration sets up the MNE-Python, MNE-BIDS, and MNE-Connectivity stack 
 `RUN pip3 install \`  
     `mne mne-bids mne-connectivity mne-bids-pipeline \`  
     `scikit-learn pandas matplotlib jupyter_client \`  
-    `jupyter_kernel_gateway`
+    `jupyter_kernel_gateway ipykernel`
+
+`# Register the Python 3 kernel spec`  
+`RUN python3 -m ipykernel install --sys-prefix`
 
 ### **vLLM Backend Configuration**
 
