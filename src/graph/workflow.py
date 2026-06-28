@@ -70,6 +70,30 @@ def normalize_content(content) -> str:
         return "".join(text_parts)
     return str(content)
 
+def detect_repetition(text: str) -> bool:
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    if not lines:
+        return False
+    
+    # 1. Check for consecutive identical lines (e.g. 3 repeats)
+    consecutive_repeats = 0
+    for idx in range(len(lines) - 1):
+        if lines[idx] == lines[idx + 1] and len(lines[idx]) > 20:
+            consecutive_repeats += 1
+            if consecutive_repeats >= 3:
+                return True
+        else:
+            consecutive_repeats = 0
+            
+    # 2. Check for overall frequency of long lines (e.g. repeated 5+ times anywhere)
+    from collections import Counter
+    line_counts = Counter(lines)
+    for line, count in line_counts.items():
+        if len(line) > 30 and count >= 5:
+            return True
+            
+    return False
+
 def planner_node(state: AgentState):
     logger.info("Planner Node: Starting plan generation...")
     planner = get_planner_agent()
@@ -98,7 +122,9 @@ def planner_node(state: AgentState):
         is_malformed = (
             finish_reason == "MALFORMED_FUNCTION_CALL" or
             plan_str.strip() == "}" or
-            len(plan_str.strip()) < 100
+            len(plan_str.strip()) < 100 or
+            len(plan_str.strip()) > 25000 or
+            detect_repetition(plan_str)
         )
         
         if not is_malformed:

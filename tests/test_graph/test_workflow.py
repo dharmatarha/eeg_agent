@@ -129,3 +129,70 @@ def test_critic_router():
     assert critic_router({"is_approved": True}) == END
     assert critic_router({"is_approved": False, "error_count": 5}) == END
     assert critic_router({"is_approved": False, "error_count": 0}) == "executor"
+
+def test_detect_repetition():
+    from src.graph.workflow import detect_repetition
+    
+    # Clean text: no repetition
+    assert not detect_repetition("Hello world\nThis is a plan\nIt should be good.")
+    
+    # 3 consecutive repeats of a line > 20 chars
+    consecutive = (
+        "This is a line that is longer than twenty characters.\n"
+        "This is a line that is longer than twenty characters.\n"
+        "This is a line that is longer than twenty characters.\n"
+        "This is a line that is longer than twenty characters."
+    )
+    assert detect_repetition(consecutive)
+    
+    # 5 repeats of a line > 30 chars anywhere
+    repeated_anywhere = (
+        "This is a very long line that will be repeated many times in the document.\n"
+        "Some intermediate text.\n"
+        "This is a very long line that will be repeated many times in the document.\n"
+        "Another text.\n"
+        "This is a very long line that will be repeated many times in the document.\n"
+        "More text.\n"
+        "This is a very long line that will be repeated many times in the document.\n"
+        "Almost done.\n"
+        "This is a very long line that will be repeated many times in the document."
+    )
+    assert detect_repetition(repeated_anywhere)
+
+@patch("src.graph.workflow.get_planner_agent")
+def test_planner_node_retry_on_repetition_and_length(mock_get_planner):
+    mock_agent = MagicMock()
+    mock_get_planner.return_value = mock_agent
+    
+    # First response: too long (26000 chars)
+    msg1 = MagicMock()
+    msg1.content = "A" * 26000
+    msg1.response_metadata = {}
+    
+    # Second response: has repetition
+    msg2 = MagicMock()
+    msg2.content = (
+        "Let's check if there are other channels in the raw data that we didn't see.\n"
+        "Let's check if there are other channels in the raw data that we didn't see.\n"
+        "Let's check if there are other channels in the raw data that we didn't see.\n"
+        "Let's check if there are other channels in the raw data that we didn't see."
+    )
+    msg2.response_metadata = {}
+    
+    # Third response: valid
+    msg3 = MagicMock()
+    msg3.content = "This is a valid plan that is long enough to pass the length constraint of 100 characters successfully without any repetition."
+    msg3.response_metadata = {}
+    
+    mock_agent.invoke.side_effect = [
+        {"messages": [msg1]},
+        {"messages": [msg2]},
+        {"messages": [msg3]},
+    ]
+    
+    state = {"user_directive": "Clean data", "data_path": "/data/test.fif"}
+    result = planner_node(state)
+    
+    assert mock_agent.invoke.call_count == 3
+    assert result == {"analysis_plan": msg3.content, "rag_history": []}
+
