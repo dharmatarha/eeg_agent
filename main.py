@@ -106,6 +106,8 @@ def main():
     thread_id = f"run_{run_timestamp}_{run_uuid}"
     config = {"configurable": {"thread_id": thread_id}}
     logger.info("Initialized session with unique Thread ID: %s", thread_id)
+    print(f"\nInitialized session with unique Thread ID: {thread_id}")
+    print(f"To inspect the session history later: python scripts/inspect_run.py -t {thread_id}\n")
     
     logger.info("Invoking Planner Agent...")
     
