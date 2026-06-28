@@ -40,7 +40,15 @@ def main():
     # We must pass the container-side path to the Planner so it writes correct code
     container_data_path = f"/mnt/data/{rel_path}"
         
-    directive = input("Enter high-level analysis directive: ").strip()
+    directive = input("Enter high-level analysis directive (or path to a text/md file): ").strip()
+    if os.path.isfile(directive):
+        logger.info("Reading analysis directive from file: %s", directive)
+        try:
+            with open(directive, "r", encoding="utf-8") as f:
+                directive = f.read().strip()
+        except Exception as e:
+            logger.error("Failed to read directive file: %s", e)
+            sys.exit(1)
     
     is_bids = False
     if os.path.isdir(data_path):
