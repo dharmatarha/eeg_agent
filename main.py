@@ -41,10 +41,11 @@ def main():
     container_data_path = f"/mnt/data/{rel_path}"
         
     directive = input("Enter high-level analysis directive (or path to a text/md file): ").strip()
-    if os.path.isfile(directive):
-        logger.info("Reading analysis directive from file: %s", directive)
+    expanded_path = os.path.abspath(os.path.expanduser(directive))
+    if os.path.isfile(expanded_path):
+        logger.info("Reading analysis directive from file: %s", expanded_path)
         try:
-            with open(directive, "r", encoding="utf-8") as f:
+            with open(expanded_path, "r", encoding="utf-8") as f:
                 directive = f.read().strip()
         except Exception as e:
             logger.error("Failed to read directive file: %s", e)
