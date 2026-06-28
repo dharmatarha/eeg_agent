@@ -31,29 +31,31 @@ def dataset_explorer(action: str, path: str, pattern: str = None, max_bytes: int
       - max_bytes (int, optional): Maximum characters/bytes to return when reading a text file (default: 8192).
     """
     logger.info("Dataset explorer running action: %s on path: %s", action, path)
+    from src.utils.path_resolver import resolve_host_path
+    resolved_path = resolve_host_path(path)
     
-    if not os.path.exists(path):
-        logger.error("Path does not exist: %s", path)
+    if not os.path.exists(resolved_path):
+        logger.error("Path does not exist: %s", resolved_path)
         return json.dumps({"error": f"Path does not exist: {path}"})
 
     if action == "list":
-        if not os.path.isdir(path):
-            logger.error("Path is not a directory: %s", path)
+        if not os.path.isdir(resolved_path):
+            logger.error("Path is not a directory: %s", resolved_path)
             return json.dumps({"error": f"Path is not a valid directory: {path}"})
         
         pattern = pattern or "*"
         matching_files = []
         
-        for root, _, files in os.walk(path):
+        for root, _, files in os.walk(resolved_path):
             for f in files:
-                rel_path = os.path.relpath(os.path.join(root, f), path)
+                rel_path = os.path.relpath(os.path.join(root, f), resolved_path)
                 if fnmatch.fnmatch(f, pattern) or fnmatch.fnmatch(rel_path, pattern):
                     matching_files.append(rel_path)
                     
         matching_files = sorted(matching_files)
         total_matches = len(matching_files)
         
-        logger.info("Found %d matching files under %s for pattern: %s", total_matches, path, pattern)
+        logger.info("Found %d matching files under %s for pattern: %s", total_matches, resolved_path, pattern)
         return json.dumps({
             "action": "list",
             "directory": path,
@@ -64,16 +66,16 @@ def dataset_explorer(action: str, path: str, pattern: str = None, max_bytes: int
         }, indent=2)
 
     elif action == "read":
-        if not os.path.isfile(path):
-            logger.error("Path is not a file: %s", path)
+        if not os.path.isfile(resolved_path):
+            logger.error("Path is not a file: %s", resolved_path)
             return json.dumps({"error": f"Path is not a valid file: {path}"})
             
         try:
-            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            with open(resolved_path, "r", encoding="utf-8", errors="ignore") as f:
                 content = f.read(max_bytes)
             
-            file_size = os.path.getsize(path)
-            logger.info("Successfully read text file %s (%d bytes).", path, len(content))
+            file_size = os.path.getsize(resolved_path)
+            logger.info("Successfully read text file %s (%d bytes).", resolved_path, len(content))
             return json.dumps({
                 "action": "read",
                 "file_path": path,
@@ -83,20 +85,20 @@ def dataset_explorer(action: str, path: str, pattern: str = None, max_bytes: int
                 "truncated": file_size > len(content)
             }, indent=2)
         except Exception as e:
-            logger.error("Failed to read text file %s: %s", path, e)
+            logger.error("Failed to read text file %s: %s", resolved_path, e)
             return json.dumps({"error": f"Failed to read file: {str(e)}"})
 
     elif action == "verify_consistency":
-        if not os.path.isdir(path):
-            logger.error("Path is not a directory: %s", path)
+        if not os.path.isdir(resolved_path):
+            logger.error("Path is not a directory: %s", resolved_path)
             return json.dumps({"error": f"Path is not a valid directory: {path}"})
             
         eeg_files = []
         extensions = (".fif", ".set", ".edf", ".vhdr", ".bdf")
         
-        for root, _, files in os.walk(path):
+        for root, _, files in os.walk(resolved_path):
             # Skip derivatives and temporary directories relative to the search path
-            rel_root = os.path.relpath(root, path)
+            rel_root = os.path.relpath(root, resolved_path)
             parts = rel_root.split(os.sep)
             if "derivatives" in parts or "tmp" in parts:
                 continue
@@ -110,7 +112,7 @@ def dataset_explorer(action: str, path: str, pattern: str = None, max_bytes: int
                         
         eeg_files = sorted(eeg_files)
         if not eeg_files:
-            logger.warning("No EEG data files found in %s.", path)
+            logger.warning("No EEG data files found in %s.", resolved_path)
             return json.dumps({"warning": f"No EEG files found in '{path}' matching pattern '{pattern or '*'}'"})
             
         # Limit checking to first 50 files for performance
@@ -118,9 +120,9 @@ def dataset_explorer(action: str, path: str, pattern: str = None, max_bytes: int
         results = {}
         errors = {}
         
-        logger.info("Verifying header consistency for %d files in %s...", len(files_to_check), path)
+        logger.info("Verifying header consistency for %d files in %s...", len(files_to_check), resolved_path)
         for f_path in files_to_check:
-            rel_name = os.path.relpath(f_path, path)
+            rel_name = os.path.relpath(f_path, resolved_path)
             try:
                 # read with preload=False is fast and memory safe
                 raw = mne.io.read_raw(f_path, preload=False, verbose='ERROR')

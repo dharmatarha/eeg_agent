@@ -15,13 +15,16 @@ def bids_inspector(bids_root: str) -> str:
     detected tasks, and metadata (channels, sampling frequency, annotations) from a representative subject.
     """
     logger.info("Starting BIDS inspection for root: %s", bids_root)
-    if not os.path.exists(bids_root) or not os.path.isdir(bids_root):
-        logger.error("BIDS root directory not found: %s", bids_root)
+    from src.utils.path_resolver import resolve_host_path
+    resolved_bids_root = resolve_host_path(bids_root)
+    
+    if not os.path.exists(resolved_bids_root) or not os.path.isdir(resolved_bids_root):
+        logger.error("BIDS root directory not found: %s", resolved_bids_root)
         return json.dumps({"error": f"BIDS root directory not found: {bids_root}"})
     
     # 1. Parse dataset_description.json
     dataset_name = "Unknown Dataset"
-    desc_path = os.path.join(bids_root, "dataset_description.json")
+    desc_path = os.path.join(resolved_bids_root, "dataset_description.json")
     if os.path.exists(desc_path):
         try:
             with open(desc_path, "r", encoding="utf-8") as f:
@@ -37,7 +40,7 @@ def bids_inspector(bids_root: str) -> str:
     runs = set()
     eeg_files = []
     
-    for root, dirs, files in os.walk(bids_root):
+    for root, dirs, files in os.walk(resolved_bids_root):
         # Find unique subjects
         for d in dirs:
             if d.startswith("sub-"):

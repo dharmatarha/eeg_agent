@@ -56,3 +56,19 @@ def test_bids_inspector_success(mock_read_raw, mock_open_file, mock_walk, mock_i
     assert rep_meta["ch_names"] == ["EEG1", "EEG2"]
     assert rep_meta["n_channels"] == 2
     assert rep_meta["sfreq"] == 250.0
+
+def test_bids_inspector_path_resolution():
+    with patch("os.environ.get") as mock_env, \
+         patch("os.path.exists") as mock_exists, \
+         patch("os.path.isdir") as mock_isdir, \
+         patch("os.walk") as mock_walk:
+        
+        mock_env.side_effect = lambda key, default=None: "/home/user/my_eeg_data" if key == "EEG_DATA_DIR" else default
+        mock_exists.side_effect = lambda path: path == "/home/user/my_eeg_data/my_bids_dataset"
+        mock_isdir.side_effect = lambda path: path == "/home/user/my_eeg_data/my_bids_dataset"
+        mock_walk.return_value = []
+        
+        result_json = bids_inspector.invoke({"bids_root": "/mnt/data/my_bids_dataset"})
+        result = json.loads(result_json)
+        assert "error" not in result
+        assert result["bids_root"] == "/mnt/data/my_bids_dataset"

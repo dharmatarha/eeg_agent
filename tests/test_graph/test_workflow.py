@@ -9,13 +9,62 @@ def test_planner_node(mock_get_planner):
     mock_get_planner.return_value = mock_agent
     
     mock_message = MagicMock()
-    mock_message.content = "Mocked Plan"
+    mock_message.content = "Mocked Plan that is long enough to pass validation because it needs to be at least 100 characters to be considered a valid analysis plan by the check."
     mock_agent.invoke.return_value = {"messages": [mock_message]}
     
     state = {"user_directive": "Clean data", "data_path": "/data/test.fif"}
     result = planner_node(state)
     
-    assert result == {"analysis_plan": "Mocked Plan", "rag_history": []}
+    assert result == {"analysis_plan": mock_message.content, "rag_history": []}
+
+@patch("src.graph.workflow.get_planner_agent")
+def test_planner_node_retry_on_malformed(mock_get_planner):
+    mock_agent = MagicMock()
+    mock_get_planner.return_value = mock_agent
+    
+    # First message: response_metadata says MALFORMED_FUNCTION_CALL
+    msg1 = MagicMock()
+    msg1.content = "}"
+    msg1.response_metadata = {"finish_reason": "MALFORMED_FUNCTION_CALL"}
+    
+    # Second message: too short
+    msg2 = MagicMock()
+    msg2.content = "short plan"
+    msg2.response_metadata = {}
+    
+    # Third message: valid
+    msg3 = MagicMock()
+    msg3.content = "This is a valid plan that is long enough to pass the length constraint of 100 characters successfully."
+    msg3.response_metadata = {}
+    
+    mock_agent.invoke.side_effect = [
+        {"messages": [msg1]},
+        {"messages": [msg2]},
+        {"messages": [msg3]},
+    ]
+    
+    state = {"user_directive": "Clean data", "data_path": "/data/test.fif"}
+    result = planner_node(state)
+    
+    assert mock_agent.invoke.call_count == 3
+    assert result == {"analysis_plan": msg3.content, "rag_history": []}
+
+@patch("src.graph.workflow.get_planner_agent")
+def test_planner_node_retry_exhausted(mock_get_planner):
+    mock_agent = MagicMock()
+    mock_get_planner.return_value = mock_agent
+    
+    msg = MagicMock()
+    msg.content = "}"
+    msg.response_metadata = {"finish_reason": "MALFORMED_FUNCTION_CALL"}
+    
+    mock_agent.invoke.return_value = {"messages": [msg]}
+    
+    state = {"user_directive": "Clean data", "data_path": "/data/test.fif"}
+    result = planner_node(state)
+    
+    assert mock_agent.invoke.call_count == 3
+    assert result == {"analysis_plan": "}", "rag_history": []}
 
 @patch("src.graph.workflow.get_executor_agent")
 def test_executor_node(mock_get_executor):

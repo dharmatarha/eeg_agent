@@ -74,14 +74,47 @@ def planner_node(state: AgentState):
     logger.info("Planner Node: Starting plan generation...")
     planner = get_planner_agent()
     prompt = f"User Directive: {state['user_directive']}\nData Path: {state['data_path']}\n\nPlease generate the Analysis Plan."
-    result = planner.invoke({"messages": [HumanMessage(content=prompt)]})
     
-    final_message = result["messages"][-1].content
-    logger.info("Planner Node: Plan generation completed.")
+    max_attempts = 3
+    final_message = ""
+    result = None
     
-    # Extract trace
-    rag_history, _ = extract_tool_trace(result["messages"])
-    
+    for attempt in range(1, max_attempts + 1):
+        logger.info("Planner Node: Plan generation attempt %d/%d...", attempt, max_attempts)
+        result = planner.invoke({"messages": [HumanMessage(content=prompt)]})
+        
+        if not result or "messages" not in result or not result["messages"]:
+            logger.warning("Planner Node: Attempt %d returned empty messages.", attempt)
+            continue
+            
+        last_msg = result["messages"][-1]
+        final_message = last_msg.content
+        plan_str = normalize_content(final_message)
+        
+        # Check metadata for malformed finish reason
+        metadata = getattr(last_msg, "response_metadata", {}) or {}
+        finish_reason = metadata.get("finish_reason", "")
+        
+        is_malformed = (
+            finish_reason == "MALFORMED_FUNCTION_CALL" or
+            plan_str.strip() == "}" or
+            len(plan_str.strip()) < 100
+        )
+        
+        if not is_malformed:
+            logger.info("Planner Node: Plan generation completed successfully on attempt %d.", attempt)
+            break
+        else:
+            logger.warning(
+                "Planner Node: Attempt %d produced malformed plan (finish_reason: %s, len: %d). Plan snippet: %s",
+                attempt, finish_reason, len(plan_str), repr(plan_str[:50])
+            )
+            
+    logger.info("Planner Node: Finalizing plan...")
+    rag_history = []
+    if result and "messages" in result:
+        rag_history, _ = extract_tool_trace(result["messages"])
+        
     return {
         "analysis_plan": normalize_content(final_message),
         "rag_history": rag_history

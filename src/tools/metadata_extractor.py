@@ -22,13 +22,16 @@ def metadata_extractor(file_path: str) -> str:
     Returns a JSON string containing channel names, sampling frequency, and annotations (triggers).
     """
     logger.info("Starting metadata extraction for file: %s", file_path)
-    if not os.path.exists(file_path):
-        logger.error("File not found for metadata extraction: %s", file_path)
+    from src.utils.path_resolver import resolve_host_path
+    resolved_file_path = resolve_host_path(file_path)
+    
+    if not os.path.exists(resolved_file_path):
+        logger.error("File not found for metadata extraction: %s", resolved_file_path)
         return json.dumps({"error": f"File not found: {file_path}"})
     
     try:
         # Preload=False ensures we don't load data into memory, just headers
-        raw = mne.io.read_raw(file_path, preload=False, verbose='ERROR')
+        raw = mne.io.read_raw(resolved_file_path, preload=False, verbose='ERROR')
         
         ch_types_dict = {}
         eeg_channels = []
@@ -76,8 +79,8 @@ def metadata_extractor(file_path: str) -> str:
                 logger.debug("Failed to parse annotations description: %s", e)
             
         # Handle BrainVision .vmrk sidecar parsing if MNE annotations are empty
-        if file_path.lower().endswith((".vhdr", ".vmrk")) and not unique_desc and not events_dict:
-            vmrk_path = file_path if file_path.lower().endswith(".vmrk") else file_path[:-5] + ".vmrk"
+        if resolved_file_path.lower().endswith((".vhdr", ".vmrk")) and not unique_desc and not events_dict:
+            vmrk_path = resolved_file_path if resolved_file_path.lower().endswith(".vmrk") else resolved_file_path[:-5] + ".vmrk"
             if os.path.exists(vmrk_path):
                 try:
                     markers = []
