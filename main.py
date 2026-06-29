@@ -50,6 +50,26 @@ def main():
         except Exception as e:
             logger.error("Failed to read directive file: %s", e)
             sys.exit(1)
+            
+    ref_run_id = input("\nEnter a previous Run ID (Thread ID) to reference (optional, press ENTER to skip): ").strip()
+    reference_run_memory = None
+    if ref_run_id:
+        ref_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "output", ref_run_id))
+        ref_memory_path = os.path.join(ref_dir, "run_memory.json")
+        if os.path.exists(ref_memory_path):
+            try:
+                with open(ref_memory_path, "r", encoding="utf-8") as f_ref:
+                    reference_run_memory = json.load(f_ref)
+                logger.info("Loaded reference memory from %s", ref_memory_path)
+                print(f"Successfully loaded memory from reference run: {ref_run_id}")
+            except Exception as e:
+                logger.error("Failed to load reference run memory: %s", e)
+                print(f"Error loading reference run memory: {e}")
+                sys.exit(1)
+        else:
+            logger.error("Reference run memory file not found at %s", ref_memory_path)
+            print(f"Reference run memory file not found at {ref_memory_path}")
+            sys.exit(1)
     
     is_bids = False
     if os.path.isdir(data_path):
@@ -89,6 +109,7 @@ def main():
         "user_directive": directive,
         "data_path": container_data_path,
         "raw_metadata": raw_metadata,
+        "reference_run": reference_run_memory,
         "analysis_plan": "",
         "execution_logs": [],
         "generated_plots": [],
@@ -170,7 +191,7 @@ def main():
         
     print("\n=== Workflow Completed ===")
     
-    output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "output"))
+    output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "output", thread_id))
     os.makedirs(output_dir, exist_ok=True)
     
     state_data = app.get_state(config).values
@@ -265,6 +286,36 @@ def main():
                 f.write(f"![{filename}]({filename})\n\n")
         
     logger.info("Report saved to %s", report_path)
+    
+    # Save structured run memory
+    memory_path = os.path.join(output_dir, "run_memory.json")
+    try:
+        try:
+            raw_meta_parsed = json.loads(state_data.get("raw_metadata", "{}"))
+        except Exception:
+            raw_meta_parsed = state_data.get("raw_metadata", "")
+            
+        run_memory = {
+            "thread_id": thread_id,
+            "timestamp": datetime.now().isoformat(),
+            "user_directive": directive,
+            "data_path": container_data_path,
+            "raw_metadata": raw_meta_parsed,
+            "analysis_plan": state_data.get("analysis_plan", ""),
+            "is_approved": state_data.get("is_approved", False),
+            "error_count": state_data.get("error_count", 0),
+            "critic_feedback": state_data.get("critic_feedback", ""),
+            "artifacts": {
+                "pipeline_script": f"output/{thread_id}/analysis_pipeline.py" if successful_code else None,
+                "report": f"output/{thread_id}/final_report.md",
+                "plots": [f"output/{thread_id}/{fn}" for fn in plot_files]
+            }
+        }
+        with open(memory_path, "w", encoding="utf-8") as f_mem:
+            json.dump(run_memory, f_mem, indent=2)
+        logger.info("Saved run memory to %s", memory_path)
+    except Exception as e:
+        logger.error("Failed to save run memory: %s", e)
 
 if __name__ == "__main__":
     main()

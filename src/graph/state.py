@@ -6,6 +6,7 @@ class AgentState(TypedDict):
     data_path: str
     raw_metadata: str
     analysis_plan: str
+    reference_run: Any
     
     # Executor state
     execution_logs: List[str]

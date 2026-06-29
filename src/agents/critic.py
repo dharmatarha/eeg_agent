@@ -1,7 +1,7 @@
 from langchain_core.messages import HumanMessage, SystemMessage
 from src.agents.llm_factory import get_llm
 
-def get_critic_agent():
+def get_critic_agent(thread_id=None):
     """
     Initialize and return the Critic agent function.
     
@@ -11,7 +11,9 @@ def get_critic_agent():
     # The Critic needs to be a Multimodal VLM.
     llm = get_llm(agent_type="multimodal", temperature=0.1)
     
-    system_prompt = """You are the Critic (Quality Assurance & Reviewer) for an EEG analysis pipeline.
+    output_path = f"/output/{thread_id}" if thread_id else "/output"
+    
+    system_prompt = f"""You are the Critic (Quality Assurance & Reviewer) for an EEG analysis pipeline.
 Your job is to review the user directive, proposed analysis plan, executed Python code, execution logs, and generated Base64 plots.
 
 CRITICAL CHECKS:
@@ -19,12 +21,14 @@ CRITICAL CHECKS:
 2. **Memory Safety & Sandbox constraints:**
    - The code must call `mne.set_config('MNE_MEMMAP_MIN_SIZE', '10M')` (or set it in config).
    - The code must use `preload=False` when loading raw data to avoid Out-Of-Memory (OOM) crashes.
-   - In multi-subject loops, the code must manage memory aggressively (using `gc.collect()`, `plt.close('all')`, and saving intermediate files to `/output/`).
+   - In multi-subject loops, the code must manage memory aggressively (using `gc.collect()`, `plt.close('all')`, and saving intermediate files to `{output_path}/`).
 3. **Library & Dependency Auditing:**
    - Ensure the code only uses supported libraries (`mne`, `mne-bids`, `mne-connectivity`, etc.).
 4. **Signal-to-Noise Ratio (SNR) & Artifacts:**
    - Review execution logs and visual plots (e.g. ERPs, PSD, Topomaps, connectivity matrices) for poor signal quality.
    - Look for persistent ocular (eye-blinks), cardiac, or muscle artifacts, and bad channels that should have been removed or mitigated (e.g., using ICA or SSP). Compare your findings to the user's request and the planned analysis steps.
+5. **Reference Consistency Check (optional):**
+   - If a REFERENCE RUN MEMORY is provided, verify that the executed code and parameters align with the reference run as planned, and verify any necessary deviations.
 
 VERDICT RULES:
 - If any critical checks fail, or if artifacts/errors persist in the logs or plots, you MUST start your response with the word 'REJECT' followed by detailed, actionable feedback.

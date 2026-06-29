@@ -16,6 +16,23 @@ def test_planner_node(mock_get_planner):
     result = planner_node(state)
     
     assert result == {"analysis_plan": mock_message.content, "rag_history": []}
+    mock_get_planner.assert_called_with(thread_id=None)
+    
+    # Test with config containing thread_id
+    config = {"configurable": {"thread_id": "test_run_123"}}
+    planner_node(state, config=config)
+    mock_get_planner.assert_called_with(thread_id="test_run_123")
+    
+    # Test with reference run
+    state_with_ref = {
+        "user_directive": "Clean data",
+        "data_path": "/data/test.fif",
+        "reference_run": {"thread_id": "ref_run_456", "user_directive": "old directive"}
+    }
+    planner_node(state_with_ref)
+    last_call_args = mock_agent.invoke.call_args[0][0]
+    assert "REFERENCE RUN MEMORY" in last_call_args["messages"][0].content
+    assert "ref_run_456" in last_call_args["messages"][0].content
 
 @patch("src.graph.workflow.get_planner_agent")
 def test_planner_node_retry_on_malformed(mock_get_planner):
@@ -85,6 +102,22 @@ def test_executor_node(mock_get_executor):
     assert result["error_count"] == 0
     assert result["rag_history"] == []
     assert result["executed_code_blocks"] == []
+    mock_get_executor.assert_called_with(thread_id=None)
+    
+    # Test with config containing thread_id
+    config = {"configurable": {"thread_id": "test_run_123"}}
+    executor_node(state, config=config)
+    mock_get_executor.assert_called_with(thread_id="test_run_123")
+    
+    # Test with reference run
+    state_with_ref = {
+        "analysis_plan": "Do something",
+        "reference_run": {"thread_id": "ref_run_456", "user_directive": "old directive"}
+    }
+    executor_node(state_with_ref)
+    last_call_args = mock_agent.invoke.call_args[0][0]
+    assert "REFERENCE RUN MEMORY" in last_call_args["messages"][0].content
+    assert "ref_run_456" in last_call_args["messages"][0].content
 
 @patch("src.graph.workflow.get_executor_agent")
 def test_executor_node_accumulates_errors(mock_get_executor):
@@ -113,6 +146,12 @@ def test_critic_node_approve(mock_get_critic):
     
     assert result["is_approved"] is True
     assert result["critic_feedback"] == "I APPROVE this."
+    mock_get_critic.assert_called_with(thread_id=None)
+    
+    # Test with config containing thread_id
+    config = {"configurable": {"thread_id": "test_run_123"}}
+    critic_node(state, config=config)
+    mock_get_critic.assert_called_with(thread_id="test_run_123")
 
 @patch("src.graph.workflow.get_critic_agent")
 def test_critic_node_reject(mock_get_critic):

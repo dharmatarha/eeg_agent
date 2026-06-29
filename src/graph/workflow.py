@@ -94,10 +94,17 @@ def detect_repetition(text: str) -> bool:
             
     return False
 
-def planner_node(state: AgentState):
+def planner_node(state: AgentState, config=None):
     logger.info("Planner Node: Starting plan generation...")
-    planner = get_planner_agent()
-    prompt = f"User Directive: {state['user_directive']}\nData Path: {state['data_path']}\n\nPlease generate the Analysis Plan."
+    thread_id = config["configurable"].get("thread_id") if config else None
+    planner = get_planner_agent(thread_id=thread_id)
+    
+    prompt = ""
+    ref_run = state.get("reference_run")
+    if ref_run:
+        prompt += f"REFERENCE RUN MEMORY (use for consistency/parameters if compatible):\n{json.dumps(ref_run, indent=2)}\n\n"
+        
+    prompt += f"User Directive: {state['user_directive']}\nData Path: {state['data_path']}\n\nPlease generate the Analysis Plan."
     
     max_attempts = 3
     final_message = ""
@@ -147,11 +154,17 @@ def planner_node(state: AgentState):
     }
 
 
-def executor_node(state: AgentState):
+def executor_node(state: AgentState, config=None):
     logger.info("Executor Node: Starting code generation and execution in Docker Sandbox...")
-    executor = get_executor_agent()
+    thread_id = config["configurable"].get("thread_id") if config else None
+    executor = get_executor_agent(thread_id=thread_id)
     
-    prompt = f"Here is the Analysis Plan to execute:\n{state['analysis_plan']}\n\n"
+    prompt = ""
+    ref_run = state.get("reference_run")
+    if ref_run:
+        prompt += f"REFERENCE RUN MEMORY:\n{json.dumps(ref_run, indent=2)}\n\n"
+        
+    prompt += f"Here is the Analysis Plan to execute:\n{state['analysis_plan']}\n\n"
     if state.get("critic_feedback"):
         logger.info("Executor Node: Incorporating Critic feedback from previous iteration.")
         prompt += f"CRITIC FEEDBACK FROM PREVIOUS RUN: {state['critic_feedback']}\nPlease adjust your code accordingly.\n"
@@ -193,9 +206,10 @@ def executor_node(state: AgentState):
     }
 
 
-def critic_node(state: AgentState):
+def critic_node(state: AgentState, config=None):
     logger.info("Critic Node: Invoking QA / review agent...")
-    critic = get_critic_agent()
+    thread_id = config["configurable"].get("thread_id") if config else None
+    critic = get_critic_agent(thread_id=thread_id)
     feedback = normalize_content(critic(state))
     
     is_approved = "APPROVE" in feedback.upper()

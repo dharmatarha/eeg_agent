@@ -53,6 +53,7 @@ The agents interact with the environment and external knowledge bases using four
 4. **`dataset_explorer` (`src/tools/dataset_explorer.py`)**: A dataset utility that lists directories recursively matching patterns, reads text configuration files (READMEs, JSON/TSV sidecars) up to size limits, and performs automatic consistency checks across files (validating matching sampling rates, channel counts, and names).
 5. **`stateful_jupyter_exec` (`src/tools/jupyter_exec.py`)**: A WebSocket client that sends code strings to a persistent Dockerized Jupyter Kernel gateway, allowing sequential analysis steps while capturing text outputs, error tracebacks, and Base64 encoded plots.
 6. **`web_search` (`src/tools/web_search.py`)**: A web search utility powered by DuckDuckGo that allows the Executor agent to retrieve API documentation, function syntax, and coding examples for third-party libraries (e.g. pandas, scikit-learn, scipy) and debug sandbox errors.
+7. **`read_reference_run_file` (`src/tools/reference_run_reader.py`)**: A utility that allows the Planner and Executor agents to inspect previous reference runs' code execution scripts, final reports, and run memories.
 
 ---
 
@@ -60,14 +61,14 @@ The agents interact with the environment and external knowledge bases using four
 
 The interaction between the agents is strictly governed by a LangGraph state machine (`src/graph/workflow.py`). 
 
-1. **Initialization:** The state initializes with the user's `user_directive` and extracted `raw_metadata`.
+1. **Initialization:** The state initializes with the user's `user_directive`, extracted `raw_metadata`, and an optional `reference_run` memory object parsed from a past session.
 2. **Planning:** The Planner formulates the `analysis_plan`.
 3. **Human-in-the-Loop (HITL):** Execution explicitly pauses here. The user must review the plan, ensuring human oversight over the proposed methodology.
 4. **Execution Loop:** 
    - The Executor generates and runs the code.
    - The Critic reviews the outputs.
    - If the Critic rejects the output (e.g., poor data quality or unhandled errors), control loops back to the Executor. This recursive loop has a hardcoded limit (e.g., 5 retries) to prevent infinite loops.
-5. **Finalization:** Once the Critic approves, the graph terminates, and the final state (containing the exact methodology and plots) is saved as a complete report.
+5. **Finalization:** Once the Critic approves, the graph terminates, and the final state (containing the exact methodology and plots) is saved as a complete report along with a structured `run_memory.json` memory file.
 
 ---
 

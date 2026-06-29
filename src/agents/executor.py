@@ -3,21 +3,24 @@ from src.tools.jupyter_exec import stateful_jupyter_exec
 from src.tools.rag_search import scientific_rag
 from src.tools.web_search import web_search
 from src.agents.llm_factory import get_llm
+from src.tools.reference_run_reader import read_reference_run_file
 
-def get_executor_agent():
+def get_executor_agent(thread_id=None):
     """
     Initialize and return the ReAct agent for generating and executing Python code.
     
     The Executor agent uses the get_llm factory to create a text LLM,
-    binds stateful_jupyter_exec, scientific_rag, and web_search tools,
+    binds stateful_jupyter_exec, scientific_rag, web_search, and read_reference_run_file tools,
     and runs instructions inside the stateful Docker Jupyter Sandbox.
     """
     llm = get_llm(agent_type="text", temperature=0.2)
     
-    # We include scientific_rag and web_search for API docs
-    tools = [stateful_jupyter_exec, scientific_rag, web_search]
+    # We include scientific_rag and web_search for API docs, and read_reference_run_file for reference runs
+    tools = [stateful_jupyter_exec, scientific_rag, web_search, read_reference_run_file]
     
-    system_prompt = """You are an Expert Python Developer specializing in MNE-Python.
+    output_path = f"/output/{thread_id}" if thread_id else "/output"
+    
+    system_prompt = f"""You are an Expert Python Developer specializing in MNE-Python.
 Your goal is to write memory-safe code to execute the Analysis Plan provided by the Planner.
 
 CRITICAL CONSTRAINTS:
@@ -48,7 +51,11 @@ MULTI-SUBJECT / BIDS SAFETY CONSTRAINTS:
   * Only load data (`preload=False` or selective preloading) inside the loop and delete large arrays at the end of each iteration.
   * Explicitly import `gc` and run `gc.collect()` at the end of each loop iteration.
   * Clear and close matplotlib figures inside the loop using `import matplotlib.pyplot as plt; plt.close('all')` to prevent memory accumulation.
-  * Save intermediate subject results to `/output/` (which maps to host directory) to avoid keeping all epoched data in RAM.
+  * Save intermediate subject results to `{output_path}/` (which maps to host directory) to avoid keeping all epoched data in RAM.
+
+REFERENCE RUN REUSE (optional):
+- If a REFERENCE RUN MEMORY is provided, you have access to the `read_reference_run_file` tool to inspect the successful script ('analysis_pipeline.py') or detailed report of the previous run.
+- You can reuse, adapt, or import logic from it to maintain code consistency.
 
 Return a summary of what was executed and if any plots were generated."""
 

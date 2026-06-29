@@ -224,13 +224,24 @@ eeg-agent
 ```
 *(Alternatively, you can run `python main.py` directly).*
 
-### 3. The Human-In-The-Loop (HITL) Process
+3. **The Human-In-The-Loop (HITL) Process**
 1. **Ingestion:** The system will prompt you for the filename or folder path of your data (relative to the `data/` directory) and your high-level directive (e.g., *"Filter 1-30Hz, apply ICA, and epoch on trigger 'Stimulus/1'"* or for cohort: *"Compute grand average ERP over all subjects for task 'P300'"*).
 2. **Review Plan:** The Planner will generate a Markdown plan. Execution will pause.
 3. **Approve/Edit:** Press `ENTER` to approve the plan and pass it to the Executor, or type corrective feedback to dynamically adjust the pipeline.
-4. **Execution, Session Persistence & Final Audit:** The Executor will run the code in the Docker sandbox, and the Critic will review the output plots. Session checkpoints are persistently saved to `logs/checkpoints.sqlite`. Upon run completion, the system automatically compiles all successful code blocks into a standalone, reproducible python script (`output/analysis_pipeline.py`) and generates a detailed audit report (`output/final_report.md`) containing the metadata, RAG retrieval audit log, sandbox code execution traces, and critic QA reviews.
+4. **Execution, Session Persistence & Final Audit:** The Executor will run the code in the Docker sandbox, and the Critic will review the output plots. Session checkpoints are persistently saved to `logs/checkpoints.sqlite`. Upon run completion, the system automatically creates a run-specific subfolder (`output/{thread_id}/`), saves all visual plots, compiles all successful code blocks into a standalone, reproducible python script (`analysis_pipeline.py`), generates a detailed audit report (`final_report.md`), and exports a structured agent memory file (`run_memory.json`) for subsequent run referencing.
 
-### 4. Inspecting Past Runs
+### 4. Referencing Previous Runs
+When initiating a session, `main.py` will prompt you for an optional past Run ID (Thread ID) to reference:
+```
+Enter a previous Run ID (Thread ID) to reference (optional, press ENTER to skip): 
+```
+If you provide a valid Thread ID:
+1. The system loads the corresponding `run_memory.json` (agent memory) and injects it into the workflow state under the `reference_run` key.
+2. The **Planner** reads this memory to adapt or replicate the previous analysis goals, parameters (e.g., filter ranges, event markers), and findings where scientifically appropriate.
+3. The **Executor** receives instructions to access the previous run's pipeline script or report using the `read_reference_run_file` tool to maintain code consistency.
+4. The **Critic** performs consistency checks to ensure the executed code aligns with the planned reference methodology.
+
+### 5. Inspecting Past Runs
 You can inspect the state and details of past runs using the run-inspection utility. This tool queries the persistent database (`logs/checkpoints.sqlite`) to show user directives, metadata, analysis plans, executed code blocks, and critic verdicts.
 
 * **List all past runs:**
