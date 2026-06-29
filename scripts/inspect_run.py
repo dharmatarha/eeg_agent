@@ -1,4 +1,21 @@
 #!/usr/bin/env python3
+"""
+EEG-ADK Run Inspection Utility.
+
+This script queries the SQLite checkpoints database (default: logs/checkpoints.sqlite)
+to view, list, and debug previous execution runs. It retrieves states serialized by
+LangGraph's SqliteSaver, formatting and displaying details like:
+- User directive and input data paths.
+- Raw metadata extracted from the dataset headers.
+- The generated Analysis Plan.
+- Sandbox code execution traces (code blocks, execution logs, status).
+- Critic reviews, approvals, and error counts.
+
+Usage:
+    python scripts/inspect_run.py --list
+    python scripts/inspect_run.py --thread-id run_YYYYMMDD_HHMMSS_uuid
+"""
+
 import os
 import sys
 import sqlite3
@@ -6,6 +23,11 @@ import argparse
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 def main():
+    """
+    Parse command line arguments, establish connection to the SQLite checkpoints
+    database, fetch available runs, and print the detailed overview of the selected
+    run. If no run ID is provided, displays an interactive run selection prompt.
+    """
     parser = argparse.ArgumentParser(description="Inspect EEG-ADK Multi-Agent run history and checkpoints.")
     parser.add_argument("-t", "--thread-id", help="The Thread ID of the run to inspect.")
     parser.add_argument("-l", "--list", action="store_true", help="List all available runs in the database.")
@@ -15,6 +37,7 @@ def main():
     
     args = parser.parse_args()
     
+    # Verify that the SQLite checkpoints database exists before opening
     if not os.path.exists(args.db_path):
         print(f"Error: Database file not found at '{args.db_path}'")
         sys.exit(1)
@@ -22,7 +45,7 @@ def main():
     conn = sqlite3.connect(args.db_path)
     saver = SqliteSaver(conn)
     
-    # Fetch all thread IDs
+    # Query distinct thread IDs from the database to identify distinct runs
     cursor = conn.cursor()
     try:
         cursor.execute("SELECT DISTINCT thread_id FROM checkpoints")
@@ -39,9 +62,9 @@ def main():
     # We sort in descending order (most recent first).
     thread_ids.sort(reverse=True)
     
-    # Resolve thread ID if not provided
     selected_thread_id = args.thread_id
     
+    # List runs and prompt the user if they didn't specify a thread-id
     if not selected_thread_id or args.list:
         print("\n=== Available Runs (Most Recent First) ===")
         runs = []
@@ -52,7 +75,7 @@ def main():
             if checkpoint_tuple:
                 channel_values = checkpoint_tuple.get("channel_values", {})
                 directive = channel_values.get("user_directive", "N/A")
-                # Clean up if it's too long
+                # Truncate directive for cleaner console layout if too long
                 if len(directive) > 60:
                     directive = directive[:57] + "..."
             runs.append((tid, directive))
@@ -63,7 +86,7 @@ def main():
         if args.list:
             sys.exit(0)
             
-        # If user didn't specify a thread-id, prompt them to choose or default to the most recent
+        # Prompt the user to select from the list
         user_choice = input(f"\nSelect a run number (1-{len(thread_ids)}) [default: 1]: ").strip()
         if not user_choice:
             selected_thread_id = thread_ids[0]
@@ -79,7 +102,7 @@ def main():
                 print("Invalid input. Defaulting to most recent.")
                 selected_thread_id = thread_ids[0]
                 
-    # Inspect the selected thread
+    # Fetch and inspect the selected thread checkpoint state
     config = {"configurable": {"thread_id": selected_thread_id}}
     checkpoint_tuple = saver.get(config)
     
@@ -99,12 +122,11 @@ def main():
     print(f"\n* Data Path:")
     print(f"  {channel_values.get('data_path', 'N/A')}")
     
-    # Format metadata representation
     raw_meta = channel_values.get("raw_metadata", "{}")
     print(f"\n* Raw Metadata:")
     print(f"  {raw_meta.strip()}")
     
-    # Analysis Plan Summary
+    # Display the Analysis Plan (full or preview mode)
     plan = channel_values.get("analysis_plan", "")
     plan_status = "Generated" if plan else "Not generated yet"
     print(f"\n* Analysis Plan ({plan_status}):")
@@ -114,7 +136,6 @@ def main():
             print(plan.strip())
             print("-" * 40)
         else:
-            # Print preview (first few lines/chars)
             lines = plan.strip().split("\n")
             preview = "\n".join(lines[:5])
             print("-" * 40)
@@ -133,6 +154,7 @@ def main():
     print(f"  - Succeeded blocks: {succeeded}")
     print(f"  - Failed blocks: {failed}")
     
+    # Print execution history on command line option or user confirmation
     if code_blocks and (args.show_code or input("\nShow executed code blocks and outputs? (y/n) [n]: ").strip().lower() == "y"):
         for idx, block in enumerate(code_blocks):
             status = "❌ Failed" if block.get("error", False) else "✅ Succeeded"
@@ -143,11 +165,11 @@ def main():
                 print(block.get("logs", "").strip())
             print("-" * 40)
             
-    # Generated Plots
+    # Visual Plots count
     plots = channel_values.get("generated_plots", [])
     print(f"\n* Generated Plots: {len(plots)}")
     
-    # Critic feedback
+    # Critic review verdict and feedback details
     feedback = channel_values.get("critic_feedback", "")
     approved = channel_values.get("is_approved", False)
     verdict = "✅ APPROVED" if approved else "❌ REJECTED"
