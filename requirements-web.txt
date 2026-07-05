@@ -1,0 +1,5 @@
+# Additional dependencies for the web bridge server (on top of requirements.txt)
+-r requirements.txt
+fastapi
+uvicorn[standard]
+python-multipart

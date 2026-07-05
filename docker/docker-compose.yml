@@ -10,17 +10,49 @@ services:
       - ../output:/output
     environment:
       - JUPYTER_TOKEN=eeg_adk_sandbox_token
-    # Note: ensure that vLLM is running either locally or inside this docker network
     deploy:
       resources:
         limits:
           memory: 24g
 
-
-  # Vector Database for RAG
+  # Vector Database for RAG (shifted to port 8001 on host to avoid port 8000 conflict with FastAPI)
   chromadb:
     image: chromadb/chroma:latest
     ports:
-      - "8000:8000"
+      - "8001:8000"
     volumes:
       - ./chroma_data:/chroma/chroma
+
+  # FastAPI Web Bridge
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ${EEG_DATA_DIR:-../data}:/workspace/data:ro
+      - ../output:/workspace/output
+      - ../logs:/workspace/logs
+      - ../chroma_data:/workspace/chroma_data
+      - ../config.json:/workspace/config.json
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - EEG_DATA_DIR=/workspace/data
+      - GATEWAY_URL=http://sandbox:8888
+      - WS_GATEWAY_URL=ws://sandbox:8888
+      - JUPYTER_TOKEN=eeg_adk_sandbox_token
+    depends_on:
+      - sandbox
+
+  # Next.js React UI
+  frontend:
+    build:
+      context: ../ui
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend

@@ -1,20 +1,59 @@
-# Actionable EEG-ADK Multi-Agent System
+# EEG-ADK Multi-Agent System
 
-This project is a multi-agent AI framework designed to automate the processing, filtering, and reporting of EEG data. By leveraging a state-graph architecture (LangGraph) and a memory-safe Docker Sandbox, it can flexibly react to variations in user instructions, data formats, and processing tools.
+This repository implements a multi-agent AI system designed to automate processing, filtering, and reporting workflows for EEG data. It utilizes a state-graph orchestration framework (LangGraph) combined with a sandbox container to run MNE-Python code. The system provides a command-line interface (CLI) and a web-based dashboard (React/Next.js).
+
+---
 
 ## Architecture Overview
 
-The system operates via three LLM agents interacting through a shared state:
+The system consists of three agents cooperating via a shared, persistent state and orchestrated as containerized services:
 
-1. **Planner (Strategist):** Translates your natural language directives into a concrete MNE-Python pipeline. It uses the **Dataset Explorer** tool (to recursively scan files, read text documentation, and perform automated multi-subject header consistency validation), the upgraded **Metadata Extractor** tool (supporting channel type classification, digital trigger discovery, and BrainVision marker sidecar parsing), or the **BIDS Inspector** tool (for BIDS datasets) to inspect datasets without loading massive binary arrays into memory. It also uses the **Scientific RAG** tool to lookup best-practice conventions and standard parameters from the neuroimaging literature and books.
-2. **Executor (Programmer):** Writes memory-safe Python code based on the Planner's blueprint and executes it inside a **Stateful Jupyter Sandbox** (with access to `mne-bids`). In addition to using the local **Scientific RAG** tool for MNE-Python documentation, it leverages the newly added **Web Search** tool (powered by DuckDuckGo) to retrieve API documentation, function syntax, and coding examples for other pre-installed libraries (e.g. pandas, scipy, scikit-learn, numpy, matplotlib) and troubleshoot sandbox errors. For multi-subject/cohort tasks, it executes subject-level loops, saving intermediate results and aggressively clearing memory (`gc.collect()` and `plt.close('all')`). If an error occurs, it recursively reads the traceback, searches for solutions using RAG/Web Search, and patches the code up to 5 times.
-3. **Critic (Reviewer):** A Multimodal Vision-Language Model that reviews the original user goal, proposed plan, executed code blocks, and logs alongside the generated Base64 plots. It performs four critical checks: plan adherence, memory-safety (such as preloading and memory-mapping settings), library auditing, and visual SNR/artifact inspection, either rejecting with detailed feedback or approving and synthesizing a manuscript-ready Methods and Results section based on the executed code.
-4. **Persistent Checkpointing & Audit Logging:** Swaps volatile checkpoints with local SQLite storage (`logs/checkpoints.sqlite`). The system isolates runs under unique thread IDs and captures detailed RAG query histories and sandbox code executions.
+```mermaid
+graph TD
+    subgraph Host Machine / Client Browser
+        Browser["EEG-ADK Analysis Studio<br/>(React / Next.js Client on Port 3000)"]
+        HostData["Raw Data Directory<br/>(./data)"]
+        HostOut["Outputs Directory<br/>(./output)"]
+        HostLogs["State Database / Checkpoints<br/>(./logs)"]
+    end
 
+    subgraph Containerized Services (Docker Compose Network)
+        Frontend["frontend Container<br/>(Node 20 / Next.js Server)"]
+        Backend["backend Container<br/>(Python 3.10 / FastAPI Server)"]
+        Sandbox["sandbox Container<br/>(Jupyter Kernel Gateway)"]
+        Chroma["chromadb Container<br/>(Chroma DB Store)"]
+    end
 
-### RAG Database Architecture
+    Browser -->|HTTP / WebSockets| Frontend
+    Browser -->|REST API / WebSockets (Port 8000)| Backend
+    Backend -->|REST / WebSocket (Port 8888)| Sandbox
+    Backend -->|Local FS Read/Write| Chroma
 
-To support neuroscientific parameter lookup and syntax generation, the system utilizes a **Dual-Collection Vector Database (ChromaDB)** combined with a filesystem-backed key-value docstore. The ingestion, chunking, and retrieval flows are optimized specifically for each document category:
+    HostData -->|Mounted read-only| Backend
+    HostData -->|Mounted read-only| Sandbox
+    HostOut -->|Mounted read-write| Backend
+    HostOut -->|Mounted read-write| Sandbox
+    HostLogs -->|Mounted read-write| Backend
+```
+
+### 1. Agents
+* **Planner:** Parses user directives and generates an MNE-Python processing plan. It utilizes the **Dataset Explorer**, **Metadata Extractor**, or **BIDS Inspector** to extract dataset info, channels, and triggers. It references the **Scientific RAG** tool to lookup processing parameters from neuroimaging papers and textbooks.
+* **Executor:** Generates and executes Python code matching the approved plan. It runs the code inside the **Sandbox** container (via Jupyter Kernel Gateway). It uses memory-safe options (`preload=False`, `gc.collect()`, `plt.close('all')`) to manage memory. In case of errors, it retries up to 5 times using error tracebacks and RAG or Web Search (DuckDuckGo).
+* **Critic:** A Vision-Language Model (VLM) that audits code correctness, memory constraints, and output plots (checking for artifacts and signal quality). It approves the output or rejects it back to the Executor with feedback.
+
+### 2. Interfaces
+* **FastAPI Backend Server (`src/web/server.py`):** Serves API endpoints for file browsing, session creation, and state updates. It streams logs and plots to the client via WebSockets and handles plan approvals. It connects to the SQLite state database (`logs/checkpoints.sqlite`) to enable session hydration.
+* **Next.js UI (`ui/`):** A web-based workspace. Powered by `assistant-ui`, it provides:
+  * A file browser matching the mounted data folder.
+  * A chat interface to start runs and display agent logs, errors, and plots.
+  * Interactive cards to review, approve, or request revisions to the Planner's plan.
+  * List and view of past completed runs.
+
+---
+
+## RAG Database Architecture
+
+The system uses ChromaDB alongside a local filesystem key-value store to lookup parameters and API usage:
 
 ```mermaid
 graph TD
@@ -45,226 +84,136 @@ graph TD
 ```
 
 #### 1. Scientific Papers (`rag_docs/articles/`)
-* **Purpose:** Provides the Planner with experimental design details, parameters (filter bounds, epochs, ICA details), and paradigm-specific heuristics.
-* **Ingestion & Chunking:** Loaded and parsed layout-aware via **IBM Docling** and chunked at paragraph/section level using **HybridChunker** (with config-based `chunk_size` tokens). Features a robust fallback to `PyPDFLoader` + `RecursiveCharacterTextSplitter` if Docling is unavailable.
-* **Summarization:** The full text reconstructed from all chunks is processed by the LLM (Gemini) to generate a concise, structured global summary of the methodologies, parameters, and findings.
-* **Storage & Metadata:** The global summary, section titles (headings path), and page numbers are injected into the metadata of **every chunk** of that paper. The chunks are embedded and indexed in the `neuroimage_methods` collection.
-* **Retrieval Flow:** 
-  1. A similarity search (`k=2`) matches the query against the paper chunks.
-  2. The returned payload merges both the specific matching text chunk (e.g., specific filter descriptions) and the **Global Summary** from the metadata.
-  3. This ensures the Planner understands both the specific text passage and the broad experimental design parameters.
+* **Purpose:** Supplies experimental design details (frequencies, epoch offsets, ICA details).
+* **Ingestion:** Parsed via IBM Docling (fallback to standard loaders). Chunks are tagged with a global summary generated by the LLM.
+* **Retrieval:** Combines matched chunks and the global summary to provide context to the Planner.
 
 #### 2. Reference Textbooks (`rag_docs/books/`)
-* **Purpose:** Provides the Planner with fundamental signal processing principles, math formulas, and statistical standards.
-* **Ingestion & Chunking:** Loaded via `PyPDFLoader` and split into larger chunks of **2,000 characters** (300 overlap) to keep mathematical and physiological concepts contiguous.
-* **Storage & Metadata:** To avoid massive token usage and rate limits, textbooks are not LLM-summarized. Instead, the book's filename/title is injected as the global summary metadata along with `source_type = 'Book'`. The chunks are indexed in the `neuroimage_methods` collection.
-* **Retrieval Flow:** Operates as a standard similarity search (`k=2`), returning matching theoretical blocks and referencing the source textbook title.
+* **Purpose:** Supplies theoretical concepts and formulas.
+* **Ingestion:** Split into 2,000-character chunks and tagged with the textbook title.
 
 #### 3. API Documentation (`rag_docs/mne_python_docs/`)
-* **Purpose:** Ensures the Executor has access to accurate code syntax, parameters, default configurations, and API examples for MNE-Python, MNE-BIDS, and MNE-Connectivity to write bug-free Python code.
-* **Ingestion & Hierarchical Chunking:** Text/Markdown files containing scraped API documentation and pipeline examples for `mne`, `mne-bids`, and `mne-connectivity` are processed using a **Hierarchical Parent-Child Indexing** strategy via LangChain's `ParentDocumentRetriever`:
-  * **Parent Chunks:** Split into structural blocks of **2,000 characters** (200 overlap).
-  * **Child Chunks:** Sub-split into tiny, high-granularity blocks of **400 characters** (50 overlap).
-* **Storage:** 
-  * The small **child chunks** are embedded and indexed in the `neuroimage_api` collection in ChromaDB.
-  * The large **parent documents** are stored in a local key-value store (`chroma_data/docstore/` using `LocalFileStore`).
-* **Retrieval Flow:**
-  1. A search query (e.g., `mne.Epochs parameters`) is run against the tiny child chunks (`neuroimage_api`), yielding extremely high matching accuracy due to the low noise level of small text blocks.
-  2. Once matched, the retriever uses the child chunk's pointer to resolve and fetch the complete **parent document** (up to 2,000 characters) from the local key-value `docstore`.
-  3. Capped at the top 2 parent matches to preserve LLM token limits, this guarantees the Executor receives a complete, unbroken code description and parameter signature, rather than a fragmented snippet of a code block.
+* **Purpose:** Supplies MNE class, function signatures, and examples.
+* **Parent-Child Indexing:** Child chunks (400 characters) are embedded in `neuroimage_api` for similarity search, resolving to the full parent chunks (2,000 characters) stored in a local directory (`chroma_data/docstore/`).
 
 ---
 
-
-
 ## Prerequisites
 
-- **Python 3.10+**
-- **Docker** & **Docker Compose**
-- **NVIDIA GPU** (Optional; recommended for running local open-source LLMs/VLMs via vLLM or training deep learning classifiers. Runs out-of-the-box on CPU when using cloud API backends like Google Gemini).
-- Local EEG Data files (e.g., `.fif`, `.set`, `.vhdr`)
+* **Docker** and **Docker Compose**
+* **Python 3.10+** (if running commands directly on the host)
+* **Google Gemini API Key** (configured as an environment variable)
 
 ---
 
 ## Setup & Installation
 
-### 1. Install & Package Configuration
-To set up import path resolution and make the custom CLI command available, perform a local editable installation:
-```bash
-pip install -e .
-```
-This automatically installs the required dependencies and registers the executable command on your workstation.
+### A. Run via Docker Compose (Recommended)
+This method launches all services together using containerized environments.
 
-### 2. Configure Settings & Environment Variables
+1. **Configure Environment Variables**:
+   Create a `.env` file in the root directory:
+   ```env
+   GOOGLE_API_KEY=your_gemini_api_key_here
+   EEG_DATA_DIR=./data
+   ```
+2. **Start Services**:
+   Execute the boot command from the root directory:
+   ```bash
+   docker compose -f docker/docker-compose.yml up -d --build
+   ```
+   * **Web Dashboard**: Access at [http://localhost:3000](http://localhost:3000)
+   * **API Backend**: Runs on [http://localhost:8000](http://localhost:8000)
+   * **Chroma DB**: Runs internally, exposing port `8001` on host.
+   * **Jupyter Sandbox**: Runs internally on port `8888`.
 
-The project separates configuration parameters (models, chunking sizes, retrieval sizes, sandbox endpoints, retry limits) from environment credentials and API keys.
+### B. Run via Local Workstation (Development Mode)
+If you want to run the python components or front-end outside of Docker:
 
-#### Centralized Configuration (`config.json`)
-All non-sensitive model configurations, chunking thresholds, and pipeline options are stored in `config.json` at the root of the project. This makes parameters easily discoverable and adjustable:
+1. **Install python package**:
+   ```bash
+   pip install -e .
+   ```
+2. **Start Sandbox Container**:
+   ```bash
+   cd docker
+   docker compose up -d sandbox
+   ```
+3. **Start FastAPI Backend**:
+   ```bash
+   python -m uvicorn src.web.server:app --reload --host 127.0.0.1 --port 8000
+   ```
+4. **Start Frontend Dev Server**:
+   ```bash
+   cd ui
+   npm install
+   npm run dev
+   ```
 
-```json
-{
-  "llm_provider": "gemini",
-  "gemini_model": "gemini-3.5-flash",
-  "vllm_api_base": "http://localhost:8000/v1",
-  "vllm_api_key": "EMPTY",
-  "vllm_model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
-  "vlm_model": "llava-hf/llava-1.5-7b-hf",
-  
-  "embedding_provider": "gemini",
-  "embedding_model": "models/gemini-embedding-001",
-  
-  "ingestion": {
-    "articles": {
-      "chunk_size": 1500,
-      "chunk_overlap": 300,
-      "summary_max_chars": 10000
-    },
-    "books": {
-      "chunk_size": 2000,
-      "chunk_overlap": 300
-    },
-    "api_docs": {
-      "parent_chunk_size": 2000,
-      "parent_chunk_overlap": 200,
-      "child_chunk_size": 400,
-      "child_chunk_overlap": 50
-    }
-  },
-  
-  "retrieval": {
-    "methods_k": 2,
-    "api_k": 2
-  },
-  
-  "sandbox": {
-    "gateway_url": "http://localhost:8888",
-    "ws_gateway_url": "ws://localhost:8888",
-    "jupyter_token": "eeg_adk_sandbox_token"
-  },
-  
-  "planner": {
-    "temperature": 0.0
-  },
-  
-  "executor": {
-    "max_retries": 5
-  }
-}
-```
+---
 
-#### Secrets & Environment Variables (`.env`)
-Create a `.env` file in the root directory to store sensitive credentials and/or local machine overrides.
+## Preparing the Knowledge Base (RAG Ingestion)
 
-**Example `.env` (Using Gemini):**
-```env
-# Gemini Credentials
-GOOGLE_API_KEY=your_gemini_api_key_here
-
-# Dynamic EEG Data Path (defaults to './data' if not set)
-EEG_DATA_DIR=/path/to/your/eeg/recordings
-
-# Optional: Override provider for local session overrides
-# LLM_PROVIDER=gemini
-# EMBEDDING_PROVIDER=local
-```
-
-**Example `.env` (Using Local vLLM):**
-```env
-# Local Server Override Keys
-VLLM_API_KEY=your_vllm_key_here
-```
-
-Any variables set in the `.env` file (or exported to the shell environment) will take precedence over `config.json` values to allow seamless override control.
-
-### 3. Start the Docker Sandbox
-The Executor agent requires the isolated Docker container to safely execute generated MNE-Python code.
-
-* **To run on CPU (Default):**
-  ```bash
-  cd docker
-  docker-compose up -d --build
-  ```
-* **To run with GPU acceleration (Recommended if NVIDIA Container Toolkit is installed):**
-  ```bash
-  cd docker
-  docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
-  ```
-
-### 4. Prepare the Knowledge Base (RAG)
-For the Planner and Executor agents to intelligently infer standard EEG parameters and use the MNE API correctly, you should populate the Vector Database:
-1. Place standard methodology papers (e.g., P300/N400 processing guidelines) as **PDF** files and official MNE-Python API documentation as **Markdown/TXT** files into the newly created `rag_docs/` directory at the root of the project.
+1. Put methodology PDFs into `rag_docs/articles/` or `rag_docs/books/`, and MNE markdown/txt docs in `rag_docs/mne_python_docs/`.
 2. Run the ingestion script:
    ```bash
    python scripts/ingest_rag_data.py
    ```
-This will automatically parse, chunk, and embed the documents into the local ChromaDB.
 
 ---
 
 ## Usage Instructions
 
-### 1. Prepare Your Data
-To maintain security and path consistency with the Docker Sandbox, **all EEG data must be placed inside the `data/` directory** located at the root of the project.
-* For single files:
-  ```bash
-  mkdir -p data
-  cp /path/to/your/eeg_recording.fif ./data/
-  ```
-* For BIDS datasets:
-  ```bash
-  mkdir -p data
-  cp -r /path/to/your/bids_dataset ./data/
-  ```
+### Web Interface
+1. Navigate to [http://localhost:3000](http://localhost:3000).
+2. Select your file/directory in the file browser.
+3. Write your analysis directive (e.g. *"Realign recordings to start/stop triggers and calculate average frequency spectra"*).
+4. Select a past Run ID to reference if needed, and click **Start Analysis**.
+5. When the plan is ready, review it in the **Plan Review** card: click **Approve** to execute or type feedback and click **Request Changes**.
+6. View the logs and Matplotlib plots on the page.
 
-### 2. Run the Multi-Agent Workflow
-Execute the workflow via the CLI:
-```bash
-eeg-agent
-```
-*(Alternatively, you can run `python main.py` directly).*
+### Command-Line Interface (CLI)
+1. Run the terminal command:
+   ```bash
+   eeg-agent
+   ```
+2. Enter your relative file path and directive.
+3. Type adjustments or press `ENTER` to approve the printed plan.
 
-3. **The Human-In-The-Loop (HITL) Process**
-1. **Ingestion:** The system will prompt you for the filename or folder path of your data (relative to the `data/` directory) and your high-level directive (e.g., *"Filter 1-30Hz, apply ICA, and epoch on trigger 'Stimulus/1'"* or for cohort: *"Compute grand average ERP over all subjects for task 'P300'"*).
-2. **Review Plan:** The Planner will generate a Markdown plan. Execution will pause.
-3. **Approve/Edit:** Press `ENTER` to approve the plan and pass it to the Executor, or type corrective feedback to dynamically adjust the pipeline.
-4. **Execution, Session Persistence & Final Audit:** The Executor will run the code in the Docker sandbox, and the Critic will review the output plots. Session checkpoints are persistently saved to `logs/checkpoints.sqlite`. Upon run completion, the system automatically creates a run-specific subfolder (`output/{thread_id}/`), saves all visual plots, compiles all successful code blocks into a standalone, reproducible python script (`analysis_pipeline.py`), generates a detailed audit report (`final_report.md`), and exports a structured agent memory file (`run_memory.json`) for subsequent run referencing.
+---
 
-### 4. Referencing Previous Runs
-When initiating a session, `main.py` will prompt you for an optional past Run ID (Thread ID) to reference:
-```
-Enter a previous Run ID (Thread ID) to reference (optional, press ENTER to skip): 
-```
-If you provide a valid Thread ID:
-1. The system loads the corresponding `run_memory.json` (agent memory) and injects it into the workflow state under the `reference_run` key.
-2. The **Planner** reads this memory to adapt or replicate the previous analysis goals, parameters (e.g., filter ranges, event markers), and findings where scientifically appropriate.
-3. The **Executor** receives instructions to access the previous run's pipeline script or report using the `read_reference_run_file` tool to maintain code consistency.
-4. The **Critic** performs consistency checks to ensure the executed code aligns with the planned reference methodology.
+## Persistence & Outputs
 
-### 5. Inspecting Past Runs
-You can inspect the state and details of past runs using the run-inspection utility. This tool queries the persistent database (`logs/checkpoints.sqlite`) to show user directives, metadata, analysis plans, executed code blocks, and critic verdicts.
+Each completed run persists the following files inside `output/{thread_id}/`:
+* `analysis_pipeline.py`: A compiled MNE-Python script containing the successful code blocks.
+* `final_report.md`: Markdown report documenting metadata, RAG queries, sandbox code executions, logs, and Critic QA.
+* `run_memory.json`: Structured run metadata containing parameters and results.
+* Generated Figures: Matplotlib plots saved as PNG/JPEG files.
 
-* **List all past runs:**
+---
+
+## Inspecting Past Runs
+Run the inspection script from the host workstation:
+
+* **List runs**:
   ```bash
   python scripts/inspect_run.py --list
   ```
-* **Inspect a specific run (interactive selection):**
+* **Interactive inspect**:
   ```bash
   python scripts/inspect_run.py
   ```
-* **Inspect a specific run by its Thread ID (non-interactive):**
+* **Inspect specific thread**:
   ```bash
   python scripts/inspect_run.py -t <thread_id>
   ```
-* **Show the full analysis plan for a run:**
+* **Show plan details**:
   ```bash
   python scripts/inspect_run.py -t <thread_id> --show-plan
   ```
 
-
-
 ---
 
-## Known Limitations
-- **Data Pathing:** Do not provide absolute paths from your host machine (e.g., `/home/user/data.set`). The Docker container cannot access them. Only provide paths relative to the `data/` directory.
-- **RAG Vector Database:** The `chromadb` instance must be populated with research PDFs to fully utilize the `scientific_rag` tool. Currently, if no documents match, the agent falls back to its foundational heuristic knowledge.
+## Technical Constraints & Safety
+* **Pathing**: Files must be relative to the `./data` directory (e.g., `ds004408/sub-001/...`). Absolute host paths cannot be resolved by the sandbox.
+* **Volume Mapping**: Ensure permissions allow the containers to write to `./output` and `./logs`.

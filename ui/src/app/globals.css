@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+/* ---- Custom theme layer ---- */
+
+@layer base {
+  :root {
+    font-family: "Inter", system-ui, -apple-system, sans-serif;
+  }
+
+  code,
+  pre,
+  kbd,
+  samp,
+  .font-mono {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(100 116 139 / 0.3);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(100 116 139 / 0.5);
+  }
+}
+
+@layer components {
+  /* Prose overrides for dark mode markdown */
+  .prose-invert {
+    --tw-prose-body: rgb(203 213 225);
+    --tw-prose-headings: rgb(226 232 240);
+    --tw-prose-links: rgb(129 140 248);
+    --tw-prose-code: rgb(167 139 250);
+    --tw-prose-pre-bg: rgb(15 23 42 / 0.6);
+    --tw-prose-pre-code: rgb(203 213 225);
+  }
+
+  /* Glass card utility */
+  .glass-card {
+    background: rgb(30 41 59 / 0.5);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgb(255 255 255 / 0.08);
+    border-radius: 1rem;
+  }
+
+  /* Gradient text */
+  .gradient-text {
+    background: linear-gradient(135deg, #818cf8, #a78bfa, #c084fc);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Pulse glow animation */
+  @keyframes pulse-glow {
+    0%,
+    100% {
+      box-shadow: 0 0 8px rgb(99 102 241 / 0.3);
+    }
+    50% {
+      box-shadow: 0 0 20px rgb(99 102 241 / 0.6);
+    }
+  }
+  .pulse-glow {
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+}
+
+/* ---- assistant-ui overrides ---- */
+/* Style the assistant-ui thread container */
+[data-aui-thread] {
+  --aui-thread-bg: transparent;
+}
+
+[data-aui-assistant-message] {
+  max-width: 100%;
+}
