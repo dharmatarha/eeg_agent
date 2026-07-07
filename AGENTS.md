@@ -92,7 +92,8 @@ The interaction between the agents is strictly governed by a LangGraph state mac
 2. **Planning:** The Planner formulates the `analysis_plan`.
 3. **Human-in-the-Loop (HITL):** Execution explicitly pauses here. The user must review the plan:
    * **In CLI Mode:** The user is prompted in the shell to approve or type corrective feedback.
-   * **In Web UI Mode:** The state is set to `awaiting_hitl`. The FastAPI backend streams this state change over WebSockets. The frontend UI renders an interactive **Plan Review Card** containing `Approve` and `Request Changes` (with a text area for comments) buttons. When clicked, the action is POSTed back to the backend, which resumes the graph execution.
+   * **In Web UI Mode:** The state is set to `awaiting_hitl`. The FastAPI backend streams this state change over WebSockets. The frontend UI renders an interactive **Plan Review Card** containing `Approve` and `Request Changes` (with a text area for comments) buttons. 
+   * **Plan Revision Loop:** When the user clicks `Request Changes` and provides natural language feedback, the backend updates the graph state with `planner_feedback` and loops back to the **Lead Planner** agent to generate a revised analysis plan. When `Approve` is clicked, the state is marked as approved, the revision loop exits, and the execution proceeds to the **Executor**.
 4. **Execution Loop:** 
    - The Executor generates and runs the code.
    - The Critic reviews the outputs.
