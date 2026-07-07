@@ -25,8 +25,8 @@ graph TD
     end
 
     Browser -->|HTTP / WebSockets| Frontend
-    Browser -->|REST API / WebSockets (Port 8000)| Backend
-    Backend -->|REST / WebSocket (Port 8888)| Sandbox
+    Browser -->|REST API / WebSockets on Port 8000| Backend
+    Backend -->|REST / WebSocket on Port 8888| Sandbox
     Backend -->|Local FS Read/Write| Chroma
 
     HostData -->|Mounted read-only| Backend
