@@ -114,10 +114,43 @@ GOOGLE_API_KEY=your_google_api_key_here
 EEG_DATA_DIR=./data
 ```
 
-### **2. Deploy with Docker Compose**
-Deploy the complete multi-container stack instantly:
+### **2. Prepare Data and RAG Vector Database**
+Before running the services, you must prepare the data folder and ingest the neuroinformatics reference knowledge base into Chroma DB on your host:
+
+* **Ingest RAG Documents**:
+  Make sure your `.env` contains the Gemini API key, then run:
+  ```bash
+  pip install -e .
+  python scripts/ingest_rag_data.py
+  ```
+  This creates the `./chroma_data` directory populated with layouts, summaries, and hierarchical indexes of standard neuroimaging papers and textbooks.
+* **Organize EEG Data**:
+  Place your EEG raw recordings under `./data`. Organize BIDS datasets under subfolders (e.g., `./data/ds004408/`).
+
+### **3. Deploy with Docker Compose**
+Start all containerized microservices:
 ```bash
 docker compose -f docker/docker-compose.yml up -d --build
 ```
-* Access the Web Studio at: `http://localhost:3000`
-* Access the API Server at: `http://localhost:8000`
+* **Web Dashboard (Next.js)**: `http://localhost:3000`
+* **API Bridge (FastAPI)**: `http://localhost:8000`
+* **Sandbox Gateway (Jupyter)**: Runs internally on port `8888`
+* **Chroma DB Port**: Host-mapped to port `8001`
+
+### **4. Run Locally (Workstation Development Mode)**
+If running outside containers:
+```bash
+# Install core, web, and test dependencies
+pip install -e .
+pip install -r requirements-web.txt
+pip install -r requirements-dev.txt
+
+# Start only the sandbox container
+cd docker && docker compose up -d sandbox && cd ..
+
+# Run FastAPI backend
+python -m uvicorn src.web.server:app --reload --host 127.0.0.1 --port 8000
+
+# Start UI
+cd ui && npm install && npm run dev
+```

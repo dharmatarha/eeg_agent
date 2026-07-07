@@ -102,14 +102,72 @@ graph TD
 
 * **Docker** and **Docker Compose**
 * **Python 3.10+** (if running commands directly on the host)
-* **Google Gemini API Key** (configured as an environment variable)
+* **Google Gemini API Key** (configured as an environment variable in `.env`)
+
+---
+
+## Quickstart Data Setup
+
+Before running the application, you need to populate the `./data` directory with your EEG datasets. The directory structure must match the following guidelines:
+
+### A. Directory Structure
+* **Single EEG Files**: Place files (e.g., `.fif`, `.edf`, `.bdf`, `.set`) directly inside the `./data` folder on your host:
+  ```text
+  ./data/
+  ├── sample.fif
+  └── recording.edf
+  ```
+* **BIDS Datasets**: Must be placed in their own subdirectories inside `./data`. A BIDS directory is automatically identified if it contains a `dataset_description.json` and subject folders starting with `sub-`:
+  ```text
+  ./data/
+  └── ds004408/
+      ├── dataset_description.json
+      ├── participants.tsv
+      ├── sub-001/
+      │   └── eeg/
+      │       ├── sub-001_task-listening_run-01_eeg.vhdr
+      │       ├── sub-001_task-listening_run-01_eeg.vmrk
+      │       └── sub-001_task-listening_run-01_eeg.eeg
+      └── sub-002/
+  ```
+
+### B. Getting Sample Data
+For testing, you can download:
+1. **MNE-Python Sample Dataset**: A standard single-subject recording (`sample_audvis_raw.fif`) can be downloaded using MNE-Python's built-in downloader or directly from [MNE's sample data repository](https://mne.tools/stable/overview/datasets_index.html#sample).
+2. **BIDS Auditory Dataset (ds004408)**: You can fetch the auditory BIDS dataset using Datalad (`datalad install https://github.com/OpenNeuroDatasets/ds004408.git`) or download it directly from [OpenNeuro](https://openneuro.org/datasets/ds004408).
+
+---
+
+## Preparing the Knowledge Base (RAG Ingestion)
+
+The system relies on an offline Chroma DB instance populated with academic papers, textbooks, and MNE documentation. The Docker stack mounts the host-side `./chroma_data` directory. If it is empty, the agents will not have access to best-practice research parameters or API syntax.
+
+1. **Verify Source Documents**:
+   The raw source documents are already pre-loaded in the repository:
+   * **Scientific Articles**: `rag_docs/articles/` (PDFs)
+   * **Reference Textbooks**: `rag_docs/books/` (PDFs)
+   * **MNE API Reference**: `rag_docs/mne_python_docs/` (TXT/MD)
+
+2. **Configure Environment Credentials**:
+   Ensure you have a `.env` file in the root directory with a valid Gemini key (used for embeddings and summarization):
+   ```env
+   GOOGLE_API_KEY=your_gemini_api_key_here
+   ```
+
+3. **Run the Ingestion Script**:
+   Install the local package on your host and execute the ingestion script to process the documents and create the `./chroma_data` database:
+   ```bash
+   pip install -e .
+   python scripts/ingest_rag_data.py
+   ```
+   *Note: Ingestion uses layout-aware chunking and LLM summarization. It may take several minutes depending on your internet connection and API rate limits.*
 
 ---
 
 ## Setup & Installation
 
 ### A. Run via Docker Compose (Recommended)
-This method launches all services together using containerized environments.
+This method launches all services together using containerized environments. It automatically mounts `./data` (read-only), `./output` (read-write), `./logs` (read-write), and `./chroma_data` (read-write).
 
 1. **Configure Environment Variables**:
    Create a `.env` file in the root directory:
@@ -128,18 +186,25 @@ This method launches all services together using containerized environments.
    * **Jupyter Sandbox**: Runs internally on port `8888`.
 
 ### B. Run via Local Workstation (Development Mode)
-If you want to run the python components or front-end outside of Docker:
+If you want to run the python backend components or Next.js dev server outside of Docker:
 
-1. **Install python package**:
+1. **Install Python Package and Web/Dev Dependencies**:
    ```bash
+   # Core agents and sandbox interfaces
    pip install -e .
+   # FastAPI web bridge dependencies
+   pip install -r requirements-web.txt
+   # (Optional) Dev dependencies for unit tests
+   pip install -r requirements-dev.txt
    ```
 2. **Start Sandbox Container**:
+   The code must execute within the isolated Docker sandbox. Boot only the sandbox container:
    ```bash
    cd docker
    docker compose up -d sandbox
    ```
 3. **Start FastAPI Backend**:
+   Run the development web server on the host:
    ```bash
    python -m uvicorn src.web.server:app --reload --host 127.0.0.1 --port 8000
    ```
@@ -149,15 +214,11 @@ If you want to run the python components or front-end outside of Docker:
    npm install
    npm run dev
    ```
+   Open [http://localhost:3000](http://localhost:3000) to view the application.
 
----
-
-## Preparing the Knowledge Base (RAG Ingestion)
-
-1. Put methodology PDFs into `rag_docs/articles/` or `rag_docs/books/`, and MNE markdown/txt docs in `rag_docs/mne_python_docs/`.
-2. Run the ingestion script:
+5. **Run Tests**:
    ```bash
-   python scripts/ingest_rag_data.py
+   pytest
    ```
 
 ---
