@@ -10,14 +10,14 @@ The system consists of three agents cooperating via a shared, persistent state a
 
 ```mermaid
 graph TD
-    subgraph Host Machine / Client Browser
+    subgraph "Host Machine / Client Browser"
         Browser["EEG-ADK Analysis Studio<br/>(React / Next.js Client on Port 3000)"]
         HostData["Raw Data Directory<br/>(./data)"]
         HostOut["Outputs Directory<br/>(./output)"]
         HostLogs["State Database / Checkpoints<br/>(./logs)"]
     end
 
-    subgraph Containerized Services (Docker Compose Network)
+    subgraph "Containerized Services (Docker Compose Network)"
         Frontend["frontend Container<br/>(Node 20 / Next.js Server)"]
         Backend["backend Container<br/>(Python 3.10 / FastAPI Server)"]
         Sandbox["sandbox Container<br/>(Jupyter Kernel Gateway)"]
