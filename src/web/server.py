@@ -338,67 +338,93 @@ async def run_execution_loop(run_id: str):
         run["graph_app"] = graph_app
         run["graph_config"] = config
 
-        # --- Phase 1: Run Planner (streams until interrupt_before=["executor"]) ---
-        await broadcast_event(
-            {
-                "type": "status",
-                "phase": "planner",
-                "message": "Planner agent is generating the analysis plan...",
-            }
-        )
-        run["phase"] = RunPhase.PLANNING
+        # --- Phase 1 & 2: Planning and HITL Revision Loop ---
+        is_first_planning = True
+        while True:
+            if is_first_planning:
+                await broadcast_event(
+                    {
+                        "type": "status",
+                        "phase": "planner",
+                        "message": "Planner agent is generating the analysis plan...",
+                    }
+                )
+            run["phase"] = RunPhase.PLANNING
 
-        # Run the graph until it hits the interrupt_before=["executor"]
-        await asyncio.to_thread(
-            _run_graph_phase_1, graph_app, run["initial_state"], config
-        )
-
-        # Read the state after planner completes
-        state_after_plan = graph_app.get_state(config)
-        plan_text = state_after_plan.values.get("analysis_plan", "")
-
-        await broadcast_event({"type": "plan_ready", "plan": plan_text})
-
-        # --- Phase 2: HITL — wait for user decision ---
-        run["phase"] = RunPhase.AWAITING_HITL
-        await broadcast_event({"type": "hitl_required", "plan": plan_text})
-
-        # Wait for the HITL event to be set (triggered from WS client or REST call)
-        run["hitl_event"].clear()
-        await run["hitl_event"].wait()
-
-        # Check if cancelled while waiting
-        if not active_run or active_run["run_id"] != run_id:
-            logger.info("Run %s: Execution aborted during HITL wait.", run_id)
-            return
-
-        hitl_decision = run["hitl_decision"]
-        if hitl_decision is None:
-            # Client cancelled or disconnected
-            logger.info("Run %s: HITL cancelled by client.", run_id)
-            await broadcast_event(
-                {"type": "status", "phase": "cancelled", "message": "Run cancelled."}
+            # Run the graph until it hits the interrupt_before=["approval_gate"]
+            # First run: start from initial_state. Subsequent runs (loops): resume execution by passing None
+            initial_val = run["initial_state"] if is_first_planning else None
+            await asyncio.to_thread(
+                _run_graph_phase_1, graph_app, initial_val, config
             )
-            return
+            is_first_planning = False
 
-        if hitl_decision.get("decision") == "reject":
-            await broadcast_event(
-                {"type": "status", "phase": "planner", "message": "Run rejected by user."}
-            )
-            await broadcast_event(
-                {"type": "completed", "thread_id": run_id}
-            )
-            return
+            # Read the state after planner completes
+            state_after_plan = graph_app.get_state(config)
+            plan_text = state_after_plan.values.get("analysis_plan", "")
 
-        # If user provided feedback, prepend it to the plan
-        feedback = hitl_decision.get("feedback", "").strip()
-        if feedback:
-            logger.info("User provided feedback on plan.")
-            current_plan = state_after_plan.values.get("analysis_plan", "")
-            graph_app.update_state(
-                config,
-                {"analysis_plan": f"USER FEEDBACK: {feedback}\n\n{current_plan}"},
-            )
+            await broadcast_event({"type": "plan_ready", "plan": plan_text})
+
+            # --- Phase 2: HITL — wait for user decision ---
+            run["phase"] = RunPhase.AWAITING_HITL
+            await broadcast_event({"type": "hitl_required", "plan": plan_text})
+
+            # Wait for the HITL event to be set (triggered from WS client or REST call)
+            run["hitl_event"].clear()
+            await run["hitl_event"].wait()
+
+            # Check if cancelled while waiting
+            if not active_run or active_run["run_id"] != run_id:
+                logger.info("Run %s: Execution aborted during HITL wait.", run_id)
+                return
+
+            hitl_decision = run["hitl_decision"]
+            if hitl_decision is None:
+                # Client cancelled or disconnected
+                logger.info("Run %s: HITL cancelled by client.", run_id)
+                await broadcast_event(
+                    {"type": "status", "phase": "cancelled", "message": "Run cancelled."}
+                )
+                return
+
+            if hitl_decision.get("decision") == "reject":
+                await broadcast_event(
+                    {"type": "status", "phase": "planner", "message": "Run rejected by user."}
+                )
+                await broadcast_event(
+                    {"type": "completed", "thread_id": run_id}
+                )
+                return
+
+            # If user provided feedback, loop back to the Planner agent
+            feedback = hitl_decision.get("feedback", "").strip()
+            if feedback:
+                logger.info("User requested changes on plan. Routing back to planner node.")
+                graph_app.update_state(
+                    config,
+                    {
+                        "is_approved": False,
+                        "planner_feedback": feedback,
+                    },
+                )
+                await broadcast_event(
+                    {
+                        "type": "status",
+                        "phase": "planner",
+                        "message": f"Planner agent is revising the plan based on feedback: {feedback}...",
+                    }
+                )
+                continue
+            else:
+                logger.info("Plan approved by user. Proceeding to code execution.")
+                graph_app.update_state(
+                    config,
+                    {
+                        "is_approved": True,
+                        "planner_feedback": "",
+                    },
+                )
+                break
 
         # --- Phase 3: Executor → Critic loop ---
         await broadcast_event(
@@ -593,6 +619,7 @@ async def create_run(req: CreateRunRequest):
         "error_count": 0,
         "critic_feedback": "",
         "is_approved": False,
+        "planner_feedback": "",
         "rag_history": [],
         "executed_code_blocks": [],
     }
@@ -783,9 +810,9 @@ async def stream_run(websocket: WebSocket, run_id: str):
 # ---------------------------------------------------------------------------
 
 
-def _run_graph_phase_1(graph_app, initial_state: dict, config: dict) -> None:
+def _run_graph_phase_1(graph_app, initial_state: dict | None, config: dict) -> None:
     """
-    Run the graph from initial state until it hits the interrupt_before=["executor"].
+    Run the graph from initial state until it hits the interrupt_before=["approval_gate"].
     This executes the planner node.
     """
     for event in graph_app.stream(initial_state, config=config):

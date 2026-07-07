@@ -357,6 +357,90 @@ class TestBackgroundExecution:
             assert "plan_ready" in sent_types
             assert "completed" in sent_types
 
+    @pytest.mark.asyncio
+    async def test_run_execution_loop_with_revision(self):
+        """Verify run_execution_loop loops back to planning on feedback, then continues upon approval."""
+        import src.web.server as server
+        from src.web.server import run_execution_loop, RunPhase
+
+        run_id = "test_revision_run"
+        mock_ws = MagicMock()
+        mock_ws.send_json = AsyncMock()
+
+        mock_hitl_event = MagicMock()
+        mock_hitl_event.wait = AsyncMock()
+
+        # Initialize mock active_run structure
+        server.active_run = {
+            "run_id": run_id,
+            "directive": "Analyze data",
+            "data_path": "/fake/path",
+            "container_data_path": "/mnt/data/path",
+            "is_bids": False,
+            "initial_state": {"user_directive": "Analyze data"},
+            "phase": RunPhase.PLANNING,
+            "graph_app": None,
+            "graph_config": None,
+            "task": None,
+            "event_log": [],
+            "websockets": {mock_ws},
+            "hitl_event": mock_hitl_event,
+            "hitl_decision": {"decision": "approve", "feedback": "please fix filter"},
+            "error": None,
+        }
+
+        # Mock dependencies of run_execution_loop
+        with patch("src.web.server.build_workflow") as mock_build, \
+             patch("src.web.server._run_graph_phase_1") as mock_phase_1, \
+             patch("src.web.server._run_graph_phase_2", return_value=[("executor", {"executed_code_blocks": [], "generated_plots": []})]) as mock_phase_2, \
+             patch("src.web.server.finalize_run", return_value={"report_path": "report.md"}) as mock_finalize:
+
+            mock_graph = MagicMock()
+            mock_state = MagicMock()
+            mock_state.values = {"analysis_plan": "Mock Plan"}
+            mock_graph.get_state.return_value = mock_state
+            mock_build.return_value = mock_graph
+
+            # We want the first HITL wait to return "please fix filter",
+            # then we change hitl_decision to {"decision": "approve", "feedback": ""} (approved)
+            # so the loop exits in the second iteration
+            call_count = 0
+            def side_effect_wait():
+                nonlocal call_count
+                call_count += 1
+                server.logger.info("DEBUG: side_effect_wait called %d times", call_count)
+                if call_count > 1:
+                    server.logger.info("DEBUG: setting decision to approve and clearing feedback")
+                    server.active_run["hitl_decision"] = {"decision": "approve", "feedback": ""}
+                return None
+            
+            mock_hitl_event.wait.side_effect = side_effect_wait
+
+            # Execute loop
+            await asyncio.wait_for(run_execution_loop(run_id), timeout=2.0)
+
+            # Assert lock is released (active_run is cleared)
+            assert server.active_run is None
+
+            # Assert internal execution steps were triggered:
+            # - build_workflow once
+            # - _run_graph_phase_1 twice (once for initial, once for revision)
+            # - _run_graph_phase_2 once (after approval)
+            mock_build.assert_called_once()
+            assert mock_phase_1.call_count == 2
+            mock_phase_2.assert_called_once()
+            mock_finalize.assert_called_once()
+
+            # Assert update_state was called on the mock graph
+            mock_graph.update_state.assert_any_call(
+                {"configurable": {"thread_id": run_id}},
+                {"is_approved": False, "planner_feedback": "please fix filter"}
+            )
+            mock_graph.update_state.assert_any_call(
+                {"configurable": {"thread_id": run_id}},
+                {"is_approved": True, "planner_feedback": ""}
+            )
+
 
 # AsyncMock helper for Python < 3.8 or custom mock setups
 class AsyncMock(MagicMock):

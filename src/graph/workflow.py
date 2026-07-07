@@ -104,7 +104,20 @@ def planner_node(state: AgentState, config=None):
     if ref_run:
         prompt += f"REFERENCE RUN MEMORY (use for consistency/parameters if compatible):\n{json.dumps(ref_run, indent=2)}\n\n"
         
-    prompt += f"User Directive: {state['user_directive']}\nData Path: {state['data_path']}\n\nPlease generate the Analysis Plan."
+    planner_feedback = state.get("planner_feedback")
+    previous_plan = state.get("analysis_plan")
+    
+    if planner_feedback and previous_plan:
+        logger.info("Planner Node: Incorporating user feedback for plan revision.")
+        prompt += (
+            f"User Directive: {state['user_directive']}\n"
+            f"Data Path: {state['data_path']}\n\n"
+            f"CURRENT ANALYSIS PLAN:\n{previous_plan}\n\n"
+            f"USER FEEDBACK / REQUESTED REVISIONS:\n{planner_feedback}\n\n"
+            f"Please revise the current Analysis Plan incorporating the user's feedback."
+        )
+    else:
+        prompt += f"User Directive: {state['user_directive']}\nData Path: {state['data_path']}\n\nPlease generate the Analysis Plan."
     
     max_attempts = 3
     final_message = ""
@@ -150,7 +163,8 @@ def planner_node(state: AgentState, config=None):
         
     return {
         "analysis_plan": normalize_content(final_message),
-        "rag_history": rag_history
+        "rag_history": rag_history,
+        "planner_feedback": ""
     }
 
 
@@ -237,18 +251,36 @@ def critic_router(state: AgentState):
         logger.info("Critic Router: Rejected. Routing back to Executor Node.")
         return "executor"
 
+def approval_gate_node(state: AgentState, config=None):
+    logger.info("Approval Gate Node: Evaluating plan approval state...")
+    return {}
+
+def approval_router(state: AgentState):
+    is_approved = state.get("is_approved", False)
+    logger.info("Approval Router: checking plan approval. approved=%s", is_approved)
+    if is_approved:
+        return "executor"
+    else:
+        return "planner"
+
 def build_workflow(checkpointer=None):
     logger.info("Building StateGraph workflow...")
     workflow = StateGraph(AgentState)
     
     workflow.add_node("planner", planner_node)
+    workflow.add_node("approval_gate", approval_gate_node)
     workflow.add_node("executor", executor_node)
     workflow.add_node("critic", critic_node)
     
     workflow.set_entry_point("planner")
     
-    # The interrupt_before flag will pause execution here for HITL
-    workflow.add_edge("planner", "executor")
+    # Transition to approval_gate, and interrupt before it to get user feedback
+    workflow.add_edge("planner", "approval_gate")
+    workflow.add_conditional_edges("approval_gate", approval_router, {
+        "planner": "planner",
+        "executor": "executor"
+    })
+    
     workflow.add_edge("executor", "critic")
     
     workflow.add_conditional_edges("critic", critic_router, {
@@ -266,5 +298,5 @@ def build_workflow(checkpointer=None):
         conn = sqlite3.connect(db_path, check_same_thread=False)
         checkpointer = SqliteSaver(conn)
         
-    return workflow.compile(interrupt_before=["executor"], checkpointer=checkpointer)
+    return workflow.compile(interrupt_before=["approval_gate"], checkpointer=checkpointer)
 

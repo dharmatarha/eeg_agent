@@ -15,7 +15,7 @@ def test_planner_node(mock_get_planner):
     state = {"user_directive": "Clean data", "data_path": "/data/test.fif"}
     result = planner_node(state)
     
-    assert result == {"analysis_plan": mock_message.content, "rag_history": []}
+    assert result == {"analysis_plan": mock_message.content, "rag_history": [], "planner_feedback": ""}
     mock_get_planner.assert_called_with(thread_id=None)
     
     # Test with config containing thread_id
@@ -64,7 +64,7 @@ def test_planner_node_retry_on_malformed(mock_get_planner):
     result = planner_node(state)
     
     assert mock_agent.invoke.call_count == 3
-    assert result == {"analysis_plan": msg3.content, "rag_history": []}
+    assert result == {"analysis_plan": msg3.content, "rag_history": [], "planner_feedback": ""}
 
 @patch("src.graph.workflow.get_planner_agent")
 def test_planner_node_retry_exhausted(mock_get_planner):
@@ -81,7 +81,7 @@ def test_planner_node_retry_exhausted(mock_get_planner):
     result = planner_node(state)
     
     assert mock_agent.invoke.call_count == 3
-    assert result == {"analysis_plan": "}", "rag_history": []}
+    assert result == {"analysis_plan": "}", "rag_history": [], "planner_feedback": ""}
 
 @patch("src.graph.workflow.get_executor_agent")
 def test_executor_node(mock_get_executor):
@@ -233,5 +233,37 @@ def test_planner_node_retry_on_repetition_and_length(mock_get_planner):
     result = planner_node(state)
     
     assert mock_agent.invoke.call_count == 3
-    assert result == {"analysis_plan": msg3.content, "rag_history": []}
+    assert result == {"analysis_plan": msg3.content, "rag_history": [], "planner_feedback": ""}
+
+def test_approval_router():
+    from src.graph.workflow import approval_router
+    assert approval_router({"is_approved": True}) == "executor"
+    assert approval_router({"is_approved": False}) == "planner"
+    assert approval_router({}) == "planner"
+
+@patch("src.graph.workflow.get_planner_agent")
+def test_planner_node_with_feedback(mock_get_planner):
+    mock_agent = MagicMock()
+    mock_get_planner.return_value = mock_agent
+    
+    mock_message = MagicMock()
+    mock_message.content = "This is a completely revised plan that satisfies the user comments and has at least 100 characters."
+    mock_agent.invoke.return_value = {"messages": [mock_message]}
+    
+    state = {
+        "user_directive": "Clean data",
+        "data_path": "/data/test.fif",
+        "analysis_plan": "Original Plan that we want to revise",
+        "planner_feedback": "Please use a highpass filter of 1Hz"
+    }
+    
+    result = planner_node(state)
+    assert result["analysis_plan"] == mock_message.content
+    assert result["planner_feedback"] == "" # Cleared
+    
+    # Check that invocation prompt contains feedback
+    called_prompt = mock_agent.invoke.call_args[0][0]["messages"][0].content
+    assert "CURRENT ANALYSIS PLAN:" in called_prompt
+    assert "USER FEEDBACK / REQUESTED REVISIONS:" in called_prompt
+    assert "Please use a highpass filter of 1Hz" in called_prompt
 
