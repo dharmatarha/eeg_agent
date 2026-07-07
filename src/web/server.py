@@ -307,13 +307,228 @@ async def list_runs():
     return JSONResponse(content={"runs": runs})
 
 
+async def run_execution_loop(run_id: str):
+    """
+    Background execution loop for the LangGraph workflow.
+    Emits events to all connected observers via registered websockets
+    and preserves event history in an in-memory event log.
+    """
+    global active_run
+    run = active_run
+    if not run or run["run_id"] != run_id:
+        return
+
+    async def broadcast_event(event: dict):
+        if not active_run or active_run["run_id"] != run_id:
+            return
+        active_run["event_log"].append(event)
+        disconnected = set()
+        for ws in active_run["websockets"]:
+            try:
+                await ws.send_json(event)
+            except Exception:
+                disconnected.add(ws)
+        active_run["websockets"] -= disconnected
+
+    try:
+        # Build the graph
+        logger.info("Building workflow for run %s in background...", run_id)
+        graph_app = build_workflow()
+        config = {"configurable": {"thread_id": run_id}}
+        run["graph_app"] = graph_app
+        run["graph_config"] = config
+
+        # --- Phase 1: Run Planner (streams until interrupt_before=["executor"]) ---
+        await broadcast_event(
+            {
+                "type": "status",
+                "phase": "planner",
+                "message": "Planner agent is generating the analysis plan...",
+            }
+        )
+        run["phase"] = RunPhase.PLANNING
+
+        # Run the graph until it hits the interrupt_before=["executor"]
+        await asyncio.to_thread(
+            _run_graph_phase_1, graph_app, run["initial_state"], config
+        )
+
+        # Read the state after planner completes
+        state_after_plan = graph_app.get_state(config)
+        plan_text = state_after_plan.values.get("analysis_plan", "")
+
+        await broadcast_event({"type": "plan_ready", "plan": plan_text})
+
+        # --- Phase 2: HITL — wait for user decision ---
+        run["phase"] = RunPhase.AWAITING_HITL
+        await broadcast_event({"type": "hitl_required", "plan": plan_text})
+
+        # Wait for the HITL event to be set (triggered from WS client or REST call)
+        run["hitl_event"].clear()
+        await run["hitl_event"].wait()
+
+        # Check if cancelled while waiting
+        if not active_run or active_run["run_id"] != run_id:
+            logger.info("Run %s: Execution aborted during HITL wait.", run_id)
+            return
+
+        hitl_decision = run["hitl_decision"]
+        if hitl_decision is None:
+            # Client cancelled or disconnected
+            logger.info("Run %s: HITL cancelled by client.", run_id)
+            await broadcast_event(
+                {"type": "status", "phase": "cancelled", "message": "Run cancelled."}
+            )
+            return
+
+        if hitl_decision.get("decision") == "reject":
+            await broadcast_event(
+                {"type": "status", "phase": "planner", "message": "Run rejected by user."}
+            )
+            await broadcast_event(
+                {"type": "completed", "thread_id": run_id}
+            )
+            return
+
+        # If user provided feedback, prepend it to the plan
+        feedback = hitl_decision.get("feedback", "").strip()
+        if feedback:
+            logger.info("User provided feedback on plan.")
+            current_plan = state_after_plan.values.get("analysis_plan", "")
+            graph_app.update_state(
+                config,
+                {"analysis_plan": f"USER FEEDBACK: {feedback}\n\n{current_plan}"},
+            )
+
+        # --- Phase 3: Executor → Critic loop ---
+        await broadcast_event(
+            {
+                "type": "status",
+                "phase": "executor",
+                "message": "Executor agent is running code in the sandbox...",
+            }
+        )
+        run["phase"] = RunPhase.EXECUTING
+
+        # Resume execution (stream None to continue from interrupt)
+        events = await asyncio.to_thread(
+            _run_graph_phase_2, graph_app, config
+        )
+
+        # Send events
+        for node_name, node_data in events:
+            # Check if cancelled during execution
+            if not active_run or active_run["run_id"] != run_id:
+                logger.info("Run %s: Execution cancelled during executor/critic loop.", run_id)
+                return
+
+            if node_name == "executor":
+                code_blocks = node_data.get("executed_code_blocks", [])
+                plots = node_data.get("generated_plots", [])
+
+                for idx, block in enumerate(code_blocks):
+                    await broadcast_event(
+                        {
+                            "type": "code_block",
+                            "index": idx,
+                            "code": block.get("code", ""),
+                            "logs": block.get("logs", ""),
+                            "error": block.get("error", False),
+                        }
+                    )
+
+                for idx, b64 in enumerate(plots):
+                    await broadcast_event(
+                        {"type": "plot", "index": idx, "base64": b64}
+                    )
+
+                await broadcast_event(
+                    {
+                        "type": "status",
+                        "phase": "executor",
+                        "message": f"Executed {len(code_blocks)} code block(s), generated {len(plots)} plot(s).",
+                    }
+                )
+
+            elif node_name == "critic":
+                feedback_text = node_data.get("critic_feedback", "")
+                is_approved = node_data.get("is_approved", False)
+                run["phase"] = RunPhase.REVIEWING
+
+                await broadcast_event(
+                    {
+                        "type": "critic_verdict",
+                        "approved": is_approved,
+                        "feedback": feedback_text,
+                    }
+                )
+
+                if not is_approved:
+                    # The graph may loop back to executor internally
+                    await broadcast_event(
+                        {
+                            "type": "status",
+                            "phase": "executor",
+                            "message": "Critic rejected. Executor is retrying...",
+                        }
+                    )
+
+        # --- Phase 4: Finalize ---
+        run["phase"] = RunPhase.COMPLETED
+        await broadcast_event(
+            {
+                "type": "status",
+                "phase": "completed",
+                "message": "Generating output artifacts...",
+            }
+        )
+
+        result = await asyncio.to_thread(
+            finalize_run, graph_app, config, run_id, run["directive"]
+        )
+
+        await broadcast_event(
+            {
+                "type": "completed",
+                "thread_id": run_id,
+                "artifacts": {
+                    "report": result.get("report_path"),
+                    "pipeline": result.get("pipeline_path"),
+                    "plots": result.get("plot_files", []),
+                },
+            }
+        )
+
+        logger.info("Run %s completed successfully.", run_id)
+
+    except asyncio.CancelledError:
+        logger.warning("Run %s background task was cancelled.", run_id)
+        try:
+            await broadcast_event(
+                {"type": "status", "phase": "cancelled", "message": "Run execution cancelled."}
+            )
+        except Exception:
+            pass
+    except Exception as e:
+        logger.error("Run %s failed: %s", run_id, e, exc_info=True)
+        run["error"] = str(e)
+        try:
+            await broadcast_event({"type": "error", "message": str(e)})
+        except Exception:
+            pass
+    finally:
+        # Clear active run lock if this run is still the active one
+        if active_run and active_run["run_id"] == run_id:
+            active_run = None
+
+
 @app.post("/api/runs", response_model=CreateRunResponse)
 async def create_run(req: CreateRunRequest):
     """
     Create a new analysis run.
 
     Validates the data path, extracts metadata, and prepares the initial state.
-    The actual graph execution starts when the client connects via WebSocket.
+    Starts the graph execution inside a managed background asyncio Task.
     Returns 409 if a run is already active.
     """
     global active_run
@@ -393,9 +608,20 @@ async def create_run(req: CreateRunRequest):
         "phase": RunPhase.PLANNING,
         "graph_app": None,
         "graph_config": None,
+        # Background task coordination
+        "task": None,
+        "event_log": [],
+        "websockets": set(),
+        "hitl_event": asyncio.Event(),
+        "hitl_decision": None,
+        "error": None,
     }
 
-    logger.info("Created run %s for data path: %s", thread_id, req.data_path)
+    # Spawn background task
+    task = asyncio.create_task(run_execution_loop(thread_id))
+    active_run["task"] = task
+
+    logger.info("Created and started run %s for data path: %s", thread_id, req.data_path)
 
     return CreateRunResponse(
         run_id=thread_id,
@@ -468,6 +694,8 @@ async def cancel_run(run_id: str):
     global active_run
     if active_run and active_run["run_id"] == run_id:
         logger.info("Cancelling active run: %s", run_id)
+        if active_run.get("task"):
+            active_run["task"].cancel()
         active_run = None
         return JSONResponse(content={"status": "cancelled", "run_id": run_id})
     raise HTTPException(status_code=404, detail="Run not found or not active.")
@@ -481,10 +709,10 @@ async def cancel_run(run_id: str):
 @app.websocket("/api/runs/{run_id}/stream")
 async def stream_run(websocket: WebSocket, run_id: str):
     """
-    WebSocket endpoint that drives graph execution and streams events to the client.
+    WebSocket endpoint that attaches to the active background run and streams events.
 
     Protocol:
-    - Server → Client: JSON events (see ServerEvent types in the implementation plan)
+    - Server → Client: JSON events (status, plan_ready, hitl_required, code_block, plot, critic_verdict, completed, error)
     - Client → Server: JSON commands (hitl_response, cancel)
     """
     global active_run
@@ -501,165 +729,53 @@ async def stream_run(websocket: WebSocket, run_id: str):
 
     run = active_run
 
+    # Register this connection to receive broadcasts
+    run["websockets"].add(websocket)
+
+    # Replay all events recorded so far to bring the client up to date
+    for event in run["event_log"]:
+        await websocket.send_json(event)
+
     try:
-        # Build the graph
-        logger.info("Building workflow for run %s...", run_id)
-        graph_app = build_workflow()
-        config = {"configurable": {"thread_id": run_id}}
-        run["graph_app"] = graph_app
-        run["graph_config"] = config
+        while True:
+            # If the run has finished and active_run cleared, exit the listener loop
+            if not active_run or active_run["run_id"] != run_id:
+                break
 
-        # --- Phase 1: Run Planner (streams until interrupt_before=["executor"]) ---
-        await websocket.send_json(
-            {"type": "status", "phase": "planner", "message": "Planner agent is generating the analysis plan..."}
-        )
-        run["phase"] = RunPhase.PLANNING
-
-        # Run the graph until it hits the interrupt_before=["executor"]
-        plan_text = ""
-        await asyncio.to_thread(
-            _run_graph_phase_1, graph_app, run["initial_state"], config
-        )
-
-        # Read the state after planner completes
-        state_after_plan = graph_app.get_state(config)
-        plan_text = state_after_plan.values.get("analysis_plan", "")
-
-        await websocket.send_json({"type": "plan_ready", "plan": plan_text})
-
-        # --- Phase 2: HITL — wait for user decision ---
-        run["phase"] = RunPhase.AWAITING_HITL
-        await websocket.send_json(
-            {"type": "hitl_required", "plan": plan_text}
-        )
-
-        # Wait for the client's HITL response
-        hitl_decision = await _wait_for_hitl(websocket)
-
-        if hitl_decision is None:
-            # Client disconnected or sent cancel
-            logger.info("Run %s: HITL cancelled by client.", run_id)
-            active_run = None
-            return
-
-        if hitl_decision.get("decision") == "reject":
-            await websocket.send_json(
-                {"type": "status", "phase": "planner", "message": "Run rejected by user."}
-            )
-            await websocket.send_json(
-                {"type": "completed", "thread_id": run_id}
-            )
-            active_run = None
-            return
-
-        # If user provided feedback, prepend it to the plan
-        feedback = hitl_decision.get("feedback", "").strip()
-        if feedback:
-            logger.info("User provided feedback on plan.")
-            current_plan = state_after_plan.values.get("analysis_plan", "")
-            graph_app.update_state(
-                config,
-                {"analysis_plan": f"USER FEEDBACK: {feedback}\n\n{current_plan}"},
-            )
-
-        # --- Phase 3: Executor → Critic loop ---
-        await websocket.send_json(
-            {"type": "status", "phase": "executor", "message": "Executor agent is running code in the sandbox..."}
-        )
-        run["phase"] = RunPhase.EXECUTING
-
-        # Resume execution (stream None to continue from interrupt)
-        events = await asyncio.to_thread(
-            _run_graph_phase_2, graph_app, config
-        )
-
-        # Send events to client
-        for node_name, node_data in events:
-            if node_name == "executor":
-                code_blocks = node_data.get("executed_code_blocks", [])
-                plots = node_data.get("generated_plots", [])
-
-                for idx, block in enumerate(code_blocks):
-                    await websocket.send_json(
-                        {
-                            "type": "code_block",
-                            "index": idx,
-                            "code": block.get("code", ""),
-                            "logs": block.get("logs", ""),
-                            "error": block.get("error", False),
-                        }
-                    )
-
-                for idx, b64 in enumerate(plots):
-                    await websocket.send_json(
-                        {"type": "plot", "index": idx, "base64": b64}
-                    )
-
+            data = await websocket.receive_text()
+            try:
+                command = json.loads(data)
+            except json.JSONDecodeError:
                 await websocket.send_json(
-                    {
-                        "type": "status",
-                        "phase": "executor",
-                        "message": f"Executed {len(code_blocks)} code block(s), generated {len(plots)} plot(s).",
-                    }
+                    {"type": "error", "message": "Invalid JSON in command."}
                 )
+                continue
 
-            elif node_name == "critic":
-                feedback_text = node_data.get("critic_feedback", "")
-                is_approved = node_data.get("is_approved", False)
-                run["phase"] = RunPhase.REVIEWING
-
-                await websocket.send_json(
-                    {
-                        "type": "critic_verdict",
-                        "approved": is_approved,
-                        "feedback": feedback_text,
-                    }
-                )
-
-                if not is_approved:
-                    # The graph may loop back to executor internally
+            cmd_type = command.get("type")
+            if cmd_type == "hitl_response":
+                if run["phase"] == RunPhase.AWAITING_HITL:
+                    run["hitl_decision"] = command
+                    run["hitl_event"].set()
+                else:
                     await websocket.send_json(
-                        {
-                            "type": "status",
-                            "phase": "executor",
-                            "message": "Critic rejected. Executor is retrying...",
-                        }
+                        {"type": "error", "message": "Not currently awaiting user decision."}
                     )
-
-        # --- Phase 4: Finalize ---
-        run["phase"] = RunPhase.COMPLETED
-        await websocket.send_json(
-            {"type": "status", "phase": "completed", "message": "Generating output artifacts..."}
-        )
-
-        result = await asyncio.to_thread(
-            finalize_run, graph_app, config, run_id, run["directive"]
-        )
-
-        await websocket.send_json(
-            {
-                "type": "completed",
-                "thread_id": run_id,
-                "artifacts": {
-                    "report": result.get("report_path"),
-                    "pipeline": result.get("pipeline_path"),
-                    "plots": result.get("plot_files", []),
-                },
-            }
-        )
-
-        logger.info("Run %s completed successfully.", run_id)
-
+            elif cmd_type == "cancel":
+                logger.info("Client requested run cancellation via WebSocket command.")
+                if run.get("task"):
+                    run["task"].cancel()
+                active_run = None
+                break
+            else:
+                await websocket.send_json(
+                    {"type": "error", "message": f"Unknown command type: {cmd_type}"}
+                )
     except WebSocketDisconnect:
-        logger.warning("Client disconnected during run %s.", run_id)
-    except Exception as e:
-        logger.error("Run %s failed: %s", run_id, e, exc_info=True)
-        try:
-            await websocket.send_json({"type": "error", "message": str(e)})
-        except Exception:
-            pass
+        logger.info("WebSocket observer disconnected from run %s.", run_id)
     finally:
-        active_run = None
+        # Deregister the connection
+        if active_run and active_run["run_id"] == run_id:
+            run["websockets"].discard(websocket)
 
 
 # ---------------------------------------------------------------------------

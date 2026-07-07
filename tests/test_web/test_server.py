@@ -6,6 +6,7 @@ WebSocket streaming tests are kept minimal since they require mocking the full
 LangGraph execution pipeline.
 """
 
+import asyncio
 import json
 import os
 import tempfile
@@ -259,11 +260,13 @@ class TestCancelRun:
     """Tests for DELETE /api/runs/{run_id}."""
 
     def test_cancels_active_run(self, client):
-        """Cancelling the active run clears the lock."""
-        with patch("src.web.server.active_run", {"run_id": "active_run_123"}):
+        """Cancelling the active run clears the lock and cancels the task."""
+        mock_task = MagicMock()
+        with patch("src.web.server.active_run", {"run_id": "active_run_123", "task": mock_task}):
             response = client.delete("/api/runs/active_run_123")
             assert response.status_code == 200
             assert response.json()["status"] == "cancelled"
+            mock_task.cancel.assert_called_once()
 
     def test_404_for_inactive_run(self, client):
         """Returns 404 when trying to cancel a non-active run."""
@@ -287,3 +290,76 @@ class TestRunState:
         """Returns 404 for a run that doesn't exist."""
         response = client.get("/api/runs/nonexistent_run/state")
         assert response.status_code == 404
+
+
+class TestBackgroundExecution:
+    """Tests to verify the background run_execution_loop and WebSocket state management."""
+
+    @pytest.mark.asyncio
+    async def test_run_execution_loop_basic(self):
+        """Verify run_execution_loop sets phase, runs graph phases, and cleans up active_run."""
+        import src.web.server as server
+        from src.web.server import run_execution_loop, RunPhase
+
+        run_id = "test_bg_run"
+        mock_ws = MagicMock()
+        mock_ws.send_json = AsyncMock()
+
+        # Mock hitl_event so it does not block on .wait()
+        mock_hitl_event = MagicMock()
+        mock_hitl_event.wait = AsyncMock()
+
+        # Initialize mock active_run structure
+        server.active_run = {
+            "run_id": run_id,
+            "directive": "Analyze data",
+            "data_path": "/fake/path",
+            "container_data_path": "/mnt/data/path",
+            "is_bids": False,
+            "initial_state": {"user_directive": "Analyze data"},
+            "phase": RunPhase.PLANNING,
+            "graph_app": None,
+            "graph_config": None,
+            "task": None,
+            "event_log": [],
+            "websockets": {mock_ws},
+            "hitl_event": mock_hitl_event,
+            "hitl_decision": {"decision": "approve", "feedback": ""},
+            "error": None,
+        }
+
+        # Mock dependencies of run_execution_loop
+        with patch("src.web.server.build_workflow") as mock_build, \
+             patch("src.web.server._run_graph_phase_1") as mock_phase_1, \
+             patch("src.web.server._run_graph_phase_2", return_value=[("executor", {"executed_code_blocks": [], "generated_plots": []})]) as mock_phase_2, \
+             patch("src.web.server.finalize_run", return_value={"report_path": "report.md"}) as mock_finalize:
+
+            mock_graph = MagicMock()
+            mock_state = MagicMock()
+            mock_state.values = {"analysis_plan": "Mock Plan"}
+            mock_graph.get_state.return_value = mock_state
+            mock_build.return_value = mock_graph
+
+            # Execute loop
+            await run_execution_loop(run_id)
+
+            # Assert lock is released (active_run is cleared)
+            assert server.active_run is None
+
+            # Assert internal execution steps were triggered
+            mock_build.assert_called_once()
+            mock_phase_1.assert_called_once()
+            mock_phase_2.assert_called_once()
+            mock_finalize.assert_called_once()
+
+            # Assert that WS broadcast was called with expected phases
+            sent_types = [call.args[0]["type"] for call in mock_ws.send_json.call_args_list]
+            assert "plan_ready" in sent_types
+            assert "completed" in sent_types
+
+
+# AsyncMock helper for Python < 3.8 or custom mock setups
+class AsyncMock(MagicMock):
+    async def __call__(self, *args, **kwargs):
+        return super(AsyncMock, self).__call__(*args, **kwargs)
+
