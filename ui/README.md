@@ -11,6 +11,7 @@ This is the Next.js/React frontend application for the EEG-ADK Multi-Agent Syste
 3. **Real-time Event Streaming**: Powered by WebSockets to stream agent logs, execution phases, and Matplotlib base64 figures instantly.
 4. **Interactive Plan Review Card**: A custom Human-in-the-Loop review component to approve proposed plans or type corrective feedback.
 5. **State Hydration**: Queries the FastAPI backend to reload the exact state, chat history, and visual results when revisiting an active or past thread.
+6. **Multi-Pane Workspace Layout**: Displays an active run split into three parallel panes for Planning & Chat, Execution Logs (collapsible code trace blocks), and the Plot Gallery to track non-linear workflow execution.
 
 ---
 

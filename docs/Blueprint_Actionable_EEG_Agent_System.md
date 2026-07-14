@@ -22,7 +22,7 @@ The primary goal of this multi-agent architecture is to mitigate the inherent in
 
 The system operates as a decoupled microservices architecture coordinated via a Docker network:
 
-* **`frontend` (Next.js client-server on port 3000):** A custom dark-themed dashboard written in TypeScript/React using `next/font/google` for optimized font rendering and `assistant-ui`'s `ExternalStoreRuntime`.
+* **`frontend` (Next.js client-server on port 3000):** A custom dark-themed dashboard written in TypeScript/React using `next/font/google` for optimized font rendering and `assistant-ui`'s `ExternalStoreRuntime`. Serves a responsive three-pane layout during active analysis to separate planning, execution logs, and visual plots.
 * **`backend` (FastAPI bridge on port 8000):** Coordinates the LangGraph state machine execution, WebSocket streaming of state transitions, REST API endpoints for browsing files, and state database checkpoints hydration.
 * **`sandbox` (Jupyter Kernel Gateway on port 8888):** Provides a stateful, isolated workspace containing MNE-Python, MNE-BIDS, and MNE-Connectivity. Retains variables and loaded datasets in RAM across multiple execution steps.
 * **`chromadb` (Vector Store on port 8001):** Holds the RAG knowledge collections for paper methods and API syntax. The backend connects directly to its local persist directory, while standalone services can query it.
