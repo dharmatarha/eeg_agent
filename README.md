@@ -231,6 +231,9 @@ If you want to run the python backend components or Next.js dev server outside o
    pytest
    ```
 
+### C. Advanced Configuration (`config.json`)
+You can fine-tune LLM backends (Gemini vs. vLLM), embeddings, sandbox connections, RAG ingestion, and agent hyperparameters using a `config.json` file at the root. For a detailed reference of all settings and their default values, see the [Configuration Guide](docs/configuration.md).
+
 ---
 
 ## Usage Instructions
