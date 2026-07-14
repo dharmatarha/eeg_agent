@@ -32,7 +32,7 @@ from src.graph.workflow import build_workflow
 from src.tools.metadata_extractor import metadata_extractor
 from src.utils.logging_config import setup_logging
 from src.web.finalize import finalize_run
-from src.web.db import init_db, insert_run, update_run_status, list_runs as list_runs_db, sync_past_runs
+from src.web.db import init_db, insert_run, update_run_status, list_runs as list_runs_db, get_run_by_id, sync_past_runs
 from langchain_core.callbacks import BaseCallbackHandler
 
 class AgentProgressCallbackHandler(BaseCallbackHandler):
@@ -925,6 +925,19 @@ async def get_run_state(run_id: str):
                 "memory": memory,
             }
         )
+
+    # Check the SQLite runs_index for interrupted/crashed runs
+    run_record = get_run_by_id(DB_PATH, run_id)
+    if run_record:
+        return JSONResponse(content={
+            "run_id": run_id,
+            "phase": "failed",
+            "state": {
+                "user_directive": run_record["directive"],
+                "data_path": run_record["data_path"],
+            },
+            "interrupted": True,
+        })
 
     raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
 

@@ -100,6 +100,37 @@ def list_runs(db_path: str) -> List[Dict[str, Any]]:
         logger.error("Failed to query runs_index: %s", e)
     return runs
 
+def get_run_by_id(db_path: str, run_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieve a single run record by its ID, or None if not found."""
+    try:
+        with _get_connection(db_path) as conn:
+            cursor = conn.execute(
+                "SELECT run_id, timestamp, directive, status, is_approved, data_path "
+                "FROM runs_index WHERE run_id = ?",
+                (run_id,)
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+
+            approved_val = row[4]
+            is_approved = None
+            if approved_val is not None:
+                is_approved = True if approved_val == 1 else False
+
+            return {
+                "run_id": row[0],
+                "timestamp": row[1],
+                "directive": row[2],
+                "status": row[3],
+                "is_approved": is_approved,
+                "data_path": row[5],
+            }
+    except sqlite3.OperationalError as e:
+        logger.error("Failed to query run %s: %s", run_id, e)
+        return None
+
+
 def sync_past_runs(db_path: str, output_dir: str) -> None:
     """Synchronize past completed runs from the filesystem output directory into SQLite."""
     if not os.path.isdir(output_dir):

@@ -29,6 +29,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.backend
+    restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
@@ -43,6 +44,10 @@ services:
       - GATEWAY_URL=http://sandbox:8888
       - WS_GATEWAY_URL=ws://sandbox:8888
       - JUPYTER_TOKEN=eeg_adk_sandbox_token
+    deploy:
+      resources:
+        limits:
+          memory: 8g
     depends_on:
       - sandbox
 

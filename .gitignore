@@ -83,3 +83,9 @@ rag_docs/
 
 # Chroma DB (vector store)
 chroma_data/
+
+# Agent run outputs (data artifacts, not source code)
+output/
+
+# Un-ignore the Next.js frontend lib/ directory (overrides generic Python lib/ rule)
+!ui/src/lib/
