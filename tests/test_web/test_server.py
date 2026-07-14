@@ -253,6 +253,45 @@ class TestCreateRun:
             assert response.status_code == 400
             assert "not found" in response.json()["detail"]
 
+    def test_create_run_success(self, client, data_dir):
+        """Verify successful run creation immediately returns 200 and sets phase to ingest."""
+        import src.web.server as server
+        from src.web.server import RunPhase
+        from src.web.db import list_runs
+
+        # Clean up active_run if any
+        server.active_run = None
+
+        response = client.post(
+            "/api/runs",
+            json={
+                "data_path": "sample.fif",
+                "directive": "Perform low-pass filter at 40Hz",
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "run_id" in data
+        assert data["data_path"] == "sample.fif"
+        assert data["is_bids"] is False
+
+        # Verify active_run state on the server
+        assert server.active_run is not None
+        assert server.active_run["run_id"] == data["run_id"]
+        assert server.active_run["phase"] == RunPhase.INGEST
+
+        # Verify database indexing
+        runs = list_runs(server.DB_PATH)
+        run_record = next((r for r in runs if r["run_id"] == data["run_id"]), None)
+        assert run_record is not None
+        assert run_record["status"] == "ingest"
+
+        # Clean up spawned background task/run
+        if server.active_run and server.active_run["task"]:
+            server.active_run["task"].cancel()
+        server.active_run = None
+
+
 
 class TestRunReport:
     """Tests for GET /api/runs/{run_id}/report."""
@@ -482,6 +521,49 @@ class TestBackgroundExecution:
                 {"configurable": {"thread_id": run_id}},
                 {"is_approved": True, "planner_feedback": ""}
             )
+
+    @pytest.mark.asyncio
+    async def test_run_execution_loop_metadata_failure(self):
+        """Verify that run_execution_loop handles metadata extraction failure gracefully."""
+        import src.web.server as server
+        from src.web.server import run_execution_loop, RunPhase
+
+        run_id = "test_metadata_fail_run"
+        mock_ws = MagicMock()
+        mock_ws.send_json = AsyncMock()
+
+        # Initialize mock active_run structure
+        server.active_run = {
+            "run_id": run_id,
+            "directive": "Analyze data",
+            "data_path": "/fake/path",
+            "container_data_path": "/mnt/data/path",
+            "is_bids": False,
+            "initial_state": {"user_directive": "Analyze data", "raw_metadata": ""},
+            "phase": RunPhase.INGEST,
+            "graph_app": None,
+            "graph_config": None,
+            "task": None,
+            "event_log": [],
+            "websockets": {mock_ws},
+            "hitl_event": MagicMock(),
+            "hitl_decision": None,
+            "error": None,
+        }
+
+        with patch("src.web.server._extract_metadata", side_effect=Exception("Disk read error")):
+            # Execute loop
+            await run_execution_loop(run_id)
+
+            # Assert active_run is cleared
+            assert server.active_run is None
+
+            # Verify that error event was broadcasted
+            sent_types = [call.args[0]["type"] for call in mock_ws.send_json.call_args_list]
+            assert "error" in sent_types
+            error_event = next(call.args[0] for call in mock_ws.send_json.call_args_list if call.args[0]["type"] == "error")
+            assert "Disk read error" in error_event["message"]
+
 
 
 # AsyncMock helper for Python < 3.8 or custom mock setups

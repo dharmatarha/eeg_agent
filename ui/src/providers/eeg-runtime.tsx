@@ -42,6 +42,8 @@ interface EegSessionContext {
   reject: () => void;
   /** Cancel the current run. */
   cancel: () => void;
+  codeBlocks: EegMessage[];
+  plots: EegMessage[];
 }
 
 const SessionCtx = createContext<EegSessionContext>({
@@ -52,6 +54,8 @@ const SessionCtx = createContext<EegSessionContext>({
   approve: () => {},
   reject: () => {},
   cancel: () => {},
+  codeBlocks: [],
+  plots: [],
 });
 
 export const useEegSession = () => useContext(SessionCtx);
@@ -435,6 +439,12 @@ export function EegRuntimeProvider({ children }: { children: ReactNode }) {
     setPhase("failed");
   }, []);
 
+  const codeBlocks = messages.filter((m) => m.type === "code_block");
+  const plots = messages.filter((m) => m.type === "plot");
+  const chatMessages = messages.filter(
+    (m) => m.type !== "code_block" && m.type !== "plot"
+  );
+
   // --- assistant-ui runtime ---
   const onNew = useCallback(async () => {
     // The composer is disabled during EEG runs; the only "new message"
@@ -443,7 +453,7 @@ export function EegRuntimeProvider({ children }: { children: ReactNode }) {
 
   const runtime = useExternalStoreRuntime({
     isRunning,
-    messages,
+    messages: chatMessages,
     convertMessage,
     onNew,
   });
@@ -456,6 +466,8 @@ export function EegRuntimeProvider({ children }: { children: ReactNode }) {
     approve,
     reject,
     cancel,
+    codeBlocks,
+    plots,
   };
 
   return (

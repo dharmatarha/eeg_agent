@@ -88,6 +88,7 @@ active_run: Optional[dict] = None  # Holds run metadata while a graph is executi
 
 
 class RunPhase(str, Enum):
+    INGEST = "ingest"
     PLANNING = "planner"
     AWAITING_HITL = "awaiting_hitl"
     EXECUTING = "executor"
@@ -199,6 +200,24 @@ def _load_reference_memory(ref_run_id: str) -> Optional[dict]:
         return None
     with open(ref_memory_path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def _detect_is_bids(data_path: str) -> bool:
+    """Fast check to see if a directory matches BIDS format, without loading any files."""
+    if os.path.isdir(data_path):
+        desc_exists = os.path.exists(
+            os.path.join(data_path, "dataset_description.json")
+        )
+        try:
+            has_sub_dirs = any(
+                d.startswith("sub-")
+                for d in os.listdir(data_path)
+                if os.path.isdir(os.path.join(data_path, d))
+            )
+        except OSError:
+            has_sub_dirs = False
+        return desc_exists or has_sub_dirs
+    return False
 
 
 def _extract_metadata(data_path: str, container_data_path: str) -> tuple[str, bool]:
@@ -343,6 +362,34 @@ async def run_execution_loop(run_id: str):
         active_run["websockets"] -= disconnected
 
     try:
+        # --- Phase 0: Metadata Ingestion ---
+        await broadcast_event(
+            {
+                "type": "status",
+                "phase": "ingest",
+                "message": "Initializing session and scanning files...",
+            }
+        )
+
+        try:
+            logger.info("Run %s: Asynchronously extracting metadata for %s...", run_id, run["data_path"])
+            raw_metadata, _ = await asyncio.to_thread(
+                _extract_metadata, run["data_path"], run["container_data_path"]
+            )
+            run["initial_state"]["raw_metadata"] = raw_metadata
+        except Exception as e:
+            logger.error("Metadata extraction failed for run %s: %s", run_id, e)
+            update_run_status(DB_PATH, run_id, RunPhase.FAILED.value)
+            await broadcast_event(
+                {
+                    "type": "error",
+                    "message": f"Metadata extraction failed: {str(e)}",
+                }
+            )
+            if active_run and active_run["run_id"] == run_id:
+                active_run = None
+            return
+
         # Build the graph
         logger.info("Building workflow for run %s in background...", run_id)
         graph_app = build_workflow()
@@ -607,14 +654,8 @@ async def create_run(req: CreateRunRequest):
     # Container-side path mapping (for Docker sandbox)
     container_data_path = f"/mnt/data/{req.data_path}"
 
-    # Extract metadata (blocking call — runs synchronously)
-    try:
-        raw_metadata, is_bids = await asyncio.to_thread(
-            _extract_metadata, data_path, container_data_path
-        )
-    except Exception as e:
-        logger.error("Metadata extraction failed: %s", e)
-        raise HTTPException(status_code=500, detail=f"Metadata extraction failed: {e}")
+    # Fast check BIDS status instantly
+    is_bids = _detect_is_bids(data_path)
 
     # Load reference run memory if provided
     reference_run_memory = None
@@ -631,11 +672,11 @@ async def create_run(req: CreateRunRequest):
     run_uuid = str(uuid.uuid4())[:8]
     thread_id = f"run_{run_timestamp}_{run_uuid}"
 
-    # Prepare initial graph state
+    # Prepare initial graph state (without metadata initially)
     initial_state = {
         "user_directive": req.directive,
         "data_path": container_data_path,
-        "raw_metadata": raw_metadata,
+        "raw_metadata": "",
         "reference_run": reference_run_memory,
         "analysis_plan": "",
         "execution_logs": [],
@@ -648,7 +689,7 @@ async def create_run(req: CreateRunRequest):
         "executed_code_blocks": [],
     }
 
-    # Register the active run
+    # Register the active run under INGEST phase
     active_run = {
         "run_id": thread_id,
         "directive": req.directive,
@@ -656,7 +697,7 @@ async def create_run(req: CreateRunRequest):
         "container_data_path": container_data_path,
         "is_bids": is_bids,
         "initial_state": initial_state,
-        "phase": RunPhase.PLANNING,
+        "phase": RunPhase.INGEST,
         "graph_app": None,
         "graph_config": None,
         # Background task coordination
@@ -674,7 +715,7 @@ async def create_run(req: CreateRunRequest):
         run_id=thread_id,
         timestamp=datetime.now().isoformat(),
         directive=req.directive,
-        status=RunPhase.PLANNING.value,
+        status=RunPhase.INGEST.value,
         is_approved=None,
         data_path=container_data_path,
     )
@@ -683,7 +724,7 @@ async def create_run(req: CreateRunRequest):
     task = asyncio.create_task(run_execution_loop(thread_id))
     active_run["task"] = task
 
-    logger.info("Created and started run %s for data path: %s", thread_id, req.data_path)
+    logger.info("Created and started run %s in ingest phase for data path: %s", thread_id, req.data_path)
 
     return CreateRunResponse(
         run_id=thread_id,
