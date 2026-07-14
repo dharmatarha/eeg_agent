@@ -42,12 +42,13 @@ graph TD
 * **Critic:** A Vision-Language Model (VLM) that audits code correctness, memory constraints, and output plots (checking for artifacts and signal quality). It approves the output or rejects it back to the Executor with feedback.
 
 ### 2. Interfaces
-* **FastAPI Backend Server (`src/web/server.py`):** Serves API endpoints for file browsing, session creation, and state updates. It streams logs and plots to the client via WebSockets and handles plan approvals. It connects to the SQLite state database (`logs/checkpoints.sqlite`) to enable session hydration.
+* **FastAPI Backend Server (`src/web/server.py`):** Serves API endpoints for file browsing, session creation, and state updates. It streams logs and plots to the client via WebSockets and handles plan approvals. It uses a local SQLite database (`logs/checkpoints.sqlite`) to maintain a fast queryable index of active/completed runs and LangGraph checkpoint states to enable session hydration.
 * **Next.js UI (`ui/`):** A web-based workspace. Powered by `assistant-ui`, it provides:
   * A file browser matching the mounted data folder.
   * A chat interface to start runs and display agent logs, errors, and plots.
   * Interactive cards to review, approve, or request revisions to the Planner's plan.
-  * List and view of past completed runs.
+  * A sidebar showing **Active Runs** (with live phase badges) and **Past Runs**, allowing users to navigate away and return to running pipelines.
+  * Dropdown selector for referencing past completed runs in new analyses.
 
 ---
 
