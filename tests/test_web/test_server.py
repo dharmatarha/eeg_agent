@@ -65,13 +65,22 @@ def output_dir(tmp_path):
 
 
 @pytest.fixture
-def client(data_dir, output_dir):
-    """Create a test client with patched directories."""
+def client(data_dir, output_dir, tmp_path):
+    """Create a test client with patched directories and database."""
+    test_db_path = os.path.join(tmp_path, "test_checkpoints.sqlite")
+    from src.web.db import init_db, sync_past_runs
+    init_db(test_db_path)
+    sync_past_runs(test_db_path, str(output_dir))
+    
     with patch("src.web.server.DATA_DIR", str(data_dir)), \
          patch("src.web.server.OUTPUT_DIR", str(output_dir)), \
+         patch("src.web.server.DB_PATH", test_db_path), \
          patch("src.web.server.active_run", None):
         from src.web.server import app
-        yield TestClient(app)
+        with TestClient(app) as tc:
+            yield tc
+
+
 
 
 class TestBrowseData:
@@ -151,10 +160,16 @@ class TestListRuns:
 
     def test_empty_output_directory(self, client, tmp_path):
         """Returns empty list when no past runs exist."""
+        import sqlite3
+        from src.web.server import DB_PATH
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("DELETE FROM runs_index")
+
         with patch("src.web.server.OUTPUT_DIR", str(tmp_path / "nonexistent")):
             response = client.get("/api/runs")
             assert response.status_code == 200
             assert response.json()["runs"] == []
+
 
 
 class TestCreateRun:

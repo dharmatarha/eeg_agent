@@ -20,6 +20,7 @@ import uuid
 from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -31,6 +32,17 @@ from src.graph.workflow import build_workflow
 from src.tools.metadata_extractor import metadata_extractor
 from src.utils.logging_config import setup_logging
 from src.web.finalize import finalize_run
+from src.web.db import init_db, insert_run, update_run_status, list_runs as list_runs_db, sync_past_runs
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+DATA_DIR = os.environ.get("EEG_DATA_DIR") or os.path.join(PROJECT_ROOT, "data")
+DATA_DIR = os.path.abspath(DATA_DIR)
+OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output")
+DB_PATH = os.path.join(PROJECT_ROOT, "logs", "checkpoints.sqlite")
 
 # ---------------------------------------------------------------------------
 # Initialization
@@ -41,10 +53,18 @@ setup_logging()
 
 logger = logging.getLogger("eeg_agent.web")
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize database schema and synchronize past runs on startup
+    init_db(DB_PATH)
+    sync_past_runs(DB_PATH, OUTPUT_DIR)
+    yield
+
 app = FastAPI(
     title="EEG-ADK Web Bridge",
     description="Bridge server connecting the assistant-ui frontend to the EEG multi-agent graph.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # CORS: allow the Next.js dev server
@@ -56,17 +76,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------------------------------------------------------------------
-# Paths
-# ---------------------------------------------------------------------------
-
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-DATA_DIR = os.environ.get("EEG_DATA_DIR") or os.path.join(PROJECT_ROOT, "data")
-DATA_DIR = os.path.abspath(DATA_DIR)
-OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output")
-
 # EEG file extensions we surface in the browser
 EEG_EXTENSIONS = {".fif", ".set", ".edf", ".bdf", ".vhdr"}
+
 
 # ---------------------------------------------------------------------------
 # Single-session state
@@ -302,8 +314,8 @@ async def browse_data():
 
 @app.get("/api/runs")
 async def list_runs():
-    """List past completed runs from the output/ directory."""
-    runs = _list_past_runs()
+    """List past completed and active runs from the SQLite database."""
+    runs = list_runs_db(DB_PATH)
     return JSONResponse(content={"runs": runs})
 
 
@@ -350,6 +362,7 @@ async def run_execution_loop(run_id: str):
                     }
                 )
             run["phase"] = RunPhase.PLANNING
+            update_run_status(DB_PATH, run_id, RunPhase.PLANNING.value)
 
             # Run the graph until it hits the interrupt_before=["approval_gate"]
             # First run: start from initial_state. Subsequent runs (loops): resume execution by passing None
@@ -367,6 +380,7 @@ async def run_execution_loop(run_id: str):
 
             # --- Phase 2: HITL — wait for user decision ---
             run["phase"] = RunPhase.AWAITING_HITL
+            update_run_status(DB_PATH, run_id, RunPhase.AWAITING_HITL.value)
             await broadcast_event({"type": "hitl_required", "plan": plan_text})
 
             # Wait for the HITL event to be set (triggered from WS client or REST call)
@@ -382,12 +396,14 @@ async def run_execution_loop(run_id: str):
             if hitl_decision is None:
                 # Client cancelled or disconnected
                 logger.info("Run %s: HITL cancelled by client.", run_id)
+                update_run_status(DB_PATH, run_id, RunPhase.FAILED.value)
                 await broadcast_event(
                     {"type": "status", "phase": "cancelled", "message": "Run cancelled."}
                 )
                 return
 
             if hitl_decision.get("decision") == "reject":
+                update_run_status(DB_PATH, run_id, RunPhase.FAILED.value, is_approved=False)
                 await broadcast_event(
                     {"type": "status", "phase": "planner", "message": "Run rejected by user."}
                 )
@@ -407,6 +423,7 @@ async def run_execution_loop(run_id: str):
                         "planner_feedback": feedback,
                     },
                 )
+                update_run_status(DB_PATH, run_id, RunPhase.PLANNING.value, is_approved=False)
                 await broadcast_event(
                     {
                         "type": "status",
@@ -424,6 +441,7 @@ async def run_execution_loop(run_id: str):
                         "planner_feedback": "",
                     },
                 )
+                update_run_status(DB_PATH, run_id, RunPhase.EXECUTING.value, is_approved=True)
                 break
 
         # --- Phase 3: Executor → Critic loop ---
@@ -435,6 +453,7 @@ async def run_execution_loop(run_id: str):
             }
         )
         run["phase"] = RunPhase.EXECUTING
+        update_run_status(DB_PATH, run_id, RunPhase.EXECUTING.value)
 
         # Resume execution (stream None to continue from interrupt)
         events = await asyncio.to_thread(
@@ -449,6 +468,7 @@ async def run_execution_loop(run_id: str):
                 return
 
             if node_name == "executor":
+                update_run_status(DB_PATH, run_id, RunPhase.EXECUTING.value)
                 code_blocks = node_data.get("executed_code_blocks", [])
                 plots = node_data.get("generated_plots", [])
 
@@ -480,6 +500,7 @@ async def run_execution_loop(run_id: str):
                 feedback_text = node_data.get("critic_feedback", "")
                 is_approved = node_data.get("is_approved", False)
                 run["phase"] = RunPhase.REVIEWING
+                update_run_status(DB_PATH, run_id, RunPhase.REVIEWING.value)
 
                 await broadcast_event(
                     {
@@ -501,6 +522,7 @@ async def run_execution_loop(run_id: str):
 
         # --- Phase 4: Finalize ---
         run["phase"] = RunPhase.COMPLETED
+        update_run_status(DB_PATH, run_id, RunPhase.COMPLETED.value)
         await broadcast_event(
             {
                 "type": "status",
@@ -529,6 +551,7 @@ async def run_execution_loop(run_id: str):
 
     except asyncio.CancelledError:
         logger.warning("Run %s background task was cancelled.", run_id)
+        update_run_status(DB_PATH, run_id, RunPhase.FAILED.value)
         try:
             await broadcast_event(
                 {"type": "status", "phase": "cancelled", "message": "Run execution cancelled."}
@@ -538,6 +561,7 @@ async def run_execution_loop(run_id: str):
     except Exception as e:
         logger.error("Run %s failed: %s", run_id, e, exc_info=True)
         run["error"] = str(e)
+        update_run_status(DB_PATH, run_id, RunPhase.FAILED.value)
         try:
             await broadcast_event({"type": "error", "message": str(e)})
         except Exception:
@@ -644,6 +668,17 @@ async def create_run(req: CreateRunRequest):
         "error": None,
     }
 
+    # Insert into SQLite database index
+    insert_run(
+        db_path=DB_PATH,
+        run_id=thread_id,
+        timestamp=datetime.now().isoformat(),
+        directive=req.directive,
+        status=RunPhase.PLANNING.value,
+        is_approved=None,
+        data_path=container_data_path,
+    )
+
     # Spawn background task
     task = asyncio.create_task(run_execution_loop(thread_id))
     active_run["task"] = task
@@ -724,6 +759,7 @@ async def cancel_run(run_id: str):
         if active_run.get("task"):
             active_run["task"].cancel()
         active_run = None
+        update_run_status(DB_PATH, run_id, RunPhase.FAILED.value)
         return JSONResponse(content={"status": "cancelled", "run_id": run_id})
     raise HTTPException(status_code=404, detail="Run not found or not active.")
 
@@ -792,6 +828,7 @@ async def stream_run(websocket: WebSocket, run_id: str):
                 if run.get("task"):
                     run["task"].cancel()
                 active_run = None
+                update_run_status(DB_PATH, run_id, RunPhase.FAILED.value)
                 break
             else:
                 await websocket.send_json(
