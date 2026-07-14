@@ -243,12 +243,14 @@ export function DataIntakeForm() {
           className="w-full bg-slate-800/50 border border-white/10 rounded-lg px-4 py-2.5 text-sm text-slate-200 focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 outline-none"
         >
           <option value="">None</option>
-          {runs.map((run) => (
-            <option key={run.run_id} value={run.run_id}>
-              {run.run_id} — {run.directive?.slice(0, 60)}
-              {run.is_approved ? " ✅" : ""}
-            </option>
-          ))}
+          {runs
+            .filter((run) => run.status === "completed")
+            .map((run) => (
+              <option key={run.run_id} value={run.run_id}>
+                {run.run_id} — {run.directive?.slice(0, 60)}
+                {run.is_approved ? " ✅" : ""}
+              </option>
+            ))}
         </select>
       </div>
 

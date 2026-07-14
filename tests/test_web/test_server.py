@@ -170,6 +170,33 @@ class TestListRuns:
             assert response.status_code == 200
             assert response.json()["runs"] == []
 
+    def test_lists_active_runs(self, client):
+        """List runs endpoint returns active runs inserted in the DB."""
+        from src.web.db import insert_run
+        from src.web.server import DB_PATH
+        insert_run(
+            db_path=DB_PATH,
+            run_id="run_active_123",
+            timestamp="2026-07-14T20:00:00",
+            directive="Active run directive",
+            status="executing",
+            is_approved=True,
+            data_path="/mnt/data/subj.fif"
+        )
+
+        response = client.get("/api/runs")
+        assert response.status_code == 200
+        runs = response.json()["runs"]
+
+        active_run_item = next((r for r in runs if r["run_id"] == "run_active_123"), None)
+        assert active_run_item is not None
+        assert active_run_item["status"] == "executing"
+        assert active_run_item["directive"] == "Active run directive"
+        assert active_run_item["is_approved"] is True
+
+
+
+
 
 
 class TestCreateRun:
