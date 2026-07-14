@@ -13,7 +13,7 @@ The primary goal of this multi-agent architecture is to mitigate the inherent in
 1. **Synthesizing Procedural Automation:** Reducing researcher overhead by automating the generation of boilerplate code for ingestion, signal filtering, epoching, and visualization.  
 2. **Intelligent Parameter Inference:** Leveraging scientific RAG to function as an expert assistant, autonomously populating standardized research parameters (such as P300 filter specifications) when user input is underspecified.  
 3. **Adaptive Script Rectification:** Maintaining execution flow through iterative self-debugging; the system dynamically resolves syntax errors or memory bottlenecks rather than halting at the first failure.  
-4. **Verified Auditability & Persistence:** Ensuring every computational decision and inference is persisted to SQLite (`logs/checkpoints.sqlite`), producing a standalone, runnable script (`output/analysis_pipeline.py`) alongside a manuscript-ready final audit report (`output/final_report.md`) that documents exact RAG queries, code blocks executed, and validation steps.
+4. **Verified Auditability & Persistence:** Ensuring every computational decision and inference is persisted to SQLite (`logs/checkpoints.sqlite`), indexing active and completed runs in the database to enable instant sidebar navigation, and producing a standalone, runnable script (`output/analysis_pipeline.py`) alongside a manuscript-ready final audit report (`output/final_report.md`) that documents exact RAG queries, code blocks executed, and validation steps.
 5. **Zero-Setup Containerization:** Utilizing Docker Compose to bundle the frontend, backend, vector database, and sandbox environment into a single, portable application requiring zero configuration.
 
 ---
@@ -34,7 +34,7 @@ The system operates as a decoupled microservices architecture coordinated via a 
 The orchestration is built on a **State-Graph framework**, where a shared "State" dictionary is maintained and updated by each node, while Google ADK defines the individual agents and their tools.
 
 * **State Object:** Maintains fields for `user_directive`, `data_path`, `raw_metadata`, `analysis_plan`, `execution_logs`, `generated_plots`, `error_count`, `critic_feedback`, `is_approved`, as well as tracking fields `rag_history` (RAG citations) and `executed_code_blocks` (sandbox execution logs).  
-* **Persistence & Session Isolation:** Uses LangGraph `SqliteSaver` to maintain state checkpoints across workflow interruptions. Each execution uses a unique timestamped thread ID (`run_YYYYMMDD_HHMMSS_uuid`) for clean session isolation.
+* **Persistence & Session Isolation:** Uses LangGraph `SqliteSaver` to maintain state checkpoints across workflow interruptions, along with a sqlite-backed `runs_index` table to register run statuses instantly for the client sidebar. Each execution uses a unique timestamped thread ID (`run_YYYYMMDD_HHMMSS_uuid`) for clean session isolation.
 * **Recursion Limits:** Hardcoded execution caps (e.g., maximum 5 retries for the Executor to fix an error) to prevent burning compute indefinitely. If the limit is reached, the graph halts and requests Human-in-the-Loop (HITL) intervention.
 
 ---
@@ -93,7 +93,7 @@ The practical deployment of the system follows a **Human-in-the-Loop (HITL)** st
 **Step 6: Reporting & Synthesis**
 * Upon Critic approval, the graph consolidates all actions into a final data package.
 * The researcher receives processed datasets, visual plots, a standalone compiled Python script (`output/analysis_pipeline.py`), and a comprehensive audit report (`output/final_report.md`).
-* Past runs can be inspected at any time in the Web UI or via the `scripts/inspect_run.py` CLI utility.
+* Active and past runs can be inspected or navigated at any time in the Web UI sidebar or via the `scripts/inspect_run.py` CLI utility.
 
 ---
 

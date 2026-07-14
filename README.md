@@ -131,6 +131,7 @@ Before running the application, you need to populate the `./data` directory with
       │       └── sub-001_task-listening_run-01_eeg.eeg
       └── sub-002/
   ```
+* **Non-BIDS / Custom Directories**: You can also structure datasets in custom directories (e.g. `subject0/`, `subject1/`) containing subject-specific files. If you select a non-BIDS directory in the web UI, the backend will scan for files directly within it, select a representative EEG file to extract raw headers, and supply the list of files to the Planner/Executor for processing.
 
 ### B. Getting Sample Data
 For testing, you can download:
@@ -162,6 +163,14 @@ The system relies on an offline Chroma DB instance populated with academic paper
    python scripts/ingest_rag_data.py
    ```
    *Note: Ingestion uses layout-aware chunking and LLM summarization. It may take several minutes depending on your internet connection and API rate limits.*
+
+4. **Adding Custom Documents (Incremental Updates)**:
+   Advanced users can place their own neuroimaging reference papers (PDFs) into `rag_docs/articles/` or textbooks into `rag_docs/books/`.
+   The ingestion script is incremental (it automatically skips files that have already been processed). If you are using the dockerized stack, you can update the database dynamically by copying new documents to the host directories and running:
+   ```bash
+   docker compose -f docker/docker-compose.yml exec backend python scripts/ingest_rag_data.py
+   ```
+   Since the `./chroma_data` directory is mounted from the host, any new embeddings will be persisted immediately and dynamically made available to the agents without requiring a container restart.
 
 ---
 
