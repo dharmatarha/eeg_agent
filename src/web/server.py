@@ -33,6 +33,162 @@ from src.tools.metadata_extractor import metadata_extractor
 from src.utils.logging_config import setup_logging
 from src.web.finalize import finalize_run
 from src.web.db import init_db, insert_run, update_run_status, list_runs as list_runs_db, sync_past_runs
+from langchain_core.callbacks import BaseCallbackHandler
+
+class AgentProgressCallbackHandler(BaseCallbackHandler):
+    """
+    LangChain callback handler that intercepts tool starts/ends, LLM starts/ends,
+    and streams real-time status and artifact events back to the client.
+    """
+    def __init__(self, run_id: str, loop: asyncio.AbstractEventLoop, broadcast_func):
+        self.run_id = run_id
+        self.loop = loop
+        self.broadcast_func = broadcast_func
+        self.tool_inputs = {}
+        self.code_block_index = 0
+        self.plot_index = 0
+
+    def _broadcast(self, event: dict):
+        if self.loop.is_running():
+            asyncio.run_coroutine_threadsafe(self.broadcast_func(event), self.loop)
+
+    def on_llm_start(
+        self,
+        serialized: dict[str, Any],
+        prompts: list[str],
+        *,
+        run_id: uuid.UUID,
+        **kwargs: Any,
+    ) -> None:
+        self._broadcast({
+            "type": "status",
+            "phase": "executor",
+            "message": "🤖 AI is generating thoughts and code...",
+        })
+
+    def on_tool_start(
+        self,
+        serialized: dict[str, Any],
+        input_str: str,
+        *,
+        run_id: uuid.UUID,
+        **kwargs: Any,
+    ) -> None:
+        name = serialized.get("name", "") or kwargs.get("name", "")
+        self.tool_inputs[run_id] = (name, input_str)
+
+        if name == "stateful_jupyter_exec":
+            msg = "💻 Running python analysis script in the Jupyter Sandbox..."
+        elif name == "scientific_rag":
+            query = input_str
+            try:
+                parsed = json.loads(input_str)
+                if isinstance(parsed, dict):
+                    query = parsed.get("query", input_str)
+            except Exception:
+                pass
+            msg = f"🔍 Searching offline Vector DB for: '{query}'..."
+        elif name == "web_search":
+            query = input_str
+            try:
+                parsed = json.loads(input_str)
+                if isinstance(parsed, dict):
+                    query = parsed.get("query", input_str)
+            except Exception:
+                pass
+            msg = f"🌐 Searching the web for: '{query}'..."
+        elif name == "metadata_extractor":
+            msg = "📋 Peeking into raw file headers to extract metadata..."
+        elif name == "bids_inspector":
+            msg = "📁 Inspecting BIDS dataset structure..."
+        elif name == "read_reference_run_file":
+            msg = "📖 Reading reference run files for code consistency..."
+        else:
+            msg = f"Executing tool: {name}..."
+
+        phase_str = "executor"
+        global active_run
+        if active_run and active_run["run_id"] == self.run_id:
+            phase = active_run["phase"]
+            phase_str = phase.value if hasattr(phase, "value") else str(phase)
+
+        self._broadcast({
+            "type": "status",
+            "phase": phase_str,
+            "message": msg,
+        })
+
+    def on_tool_end(
+        self,
+        output: Any,
+        *,
+        run_id: uuid.UUID,
+        **kwargs: Any,
+    ) -> None:
+        tool_info = self.tool_inputs.pop(run_id, None)
+        if not tool_info:
+            return
+        name, input_str = tool_info
+
+        phase_str = "executor"
+        global active_run
+        if active_run and active_run["run_id"] == self.run_id:
+            phase = active_run["phase"]
+            phase_str = phase.value if hasattr(phase, "value") else str(phase)
+
+        if name == "stateful_jupyter_exec":
+            try:
+                res = json.loads(str(output))
+                logs = res.get("logs", "")
+                error = res.get("error", False)
+                images = res.get("images", [])
+
+                code = input_str
+                try:
+                    parsed = json.loads(input_str)
+                    if isinstance(parsed, dict):
+                        code = parsed.get("code_string", input_str)
+                except Exception:
+                    pass
+
+                # Broadcast code block immediately
+                self._broadcast({
+                    "type": "code_block",
+                    "index": self.code_block_index,
+                    "code": code,
+                    "logs": logs,
+                    "error": error,
+                })
+                self.code_block_index += 1
+
+                # Broadcast plots immediately
+                for img in images:
+                    self._broadcast({
+                        "type": "plot",
+                        "index": self.plot_index,
+                        "base64": img,
+                    })
+                    self.plot_index += 1
+
+                self._broadcast({
+                    "type": "status",
+                    "phase": phase_str,
+                    "message": f"Finished executing code block. Success={not error}.",
+                })
+            except Exception as e:
+                logger.error("Callback failed parsing stateful_jupyter_exec output: %s", e)
+        elif name == "scientific_rag":
+            self._broadcast({
+                "type": "status",
+                "phase": phase_str,
+                "message": "🔍 Offline search completed.",
+            })
+        elif name == "web_search":
+            self._broadcast({
+                "type": "status",
+                "phase": phase_str,
+                "message": "🌐 Web search completed.",
+            })
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -393,7 +549,12 @@ async def run_execution_loop(run_id: str):
         # Build the graph
         logger.info("Building workflow for run %s in background...", run_id)
         graph_app = build_workflow()
-        config = {"configurable": {"thread_id": run_id}}
+        loop = asyncio.get_running_loop()
+        cb = AgentProgressCallbackHandler(run_id, loop, broadcast_event)
+        config = {
+            "configurable": {"thread_id": run_id},
+            "callbacks": [cb]
+        }
         run["graph_app"] = graph_app
         run["graph_config"] = config
 
@@ -464,7 +625,7 @@ async def run_execution_loop(run_id: str):
             if feedback:
                 logger.info("User requested changes on plan. Routing back to planner node.")
                 graph_app.update_state(
-                    config,
+                    {"configurable": {"thread_id": run_id}},
                     {
                         "is_approved": False,
                         "planner_feedback": feedback,
@@ -482,7 +643,7 @@ async def run_execution_loop(run_id: str):
             else:
                 logger.info("Plan approved by user. Proceeding to code execution.")
                 graph_app.update_state(
-                    config,
+                    {"configurable": {"thread_id": run_id}},
                     {
                         "is_approved": True,
                         "planner_feedback": "",

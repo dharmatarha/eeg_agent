@@ -7,6 +7,8 @@
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { getRunReport } from "@/lib/api";
 
 interface ReportViewerProps {
@@ -50,7 +52,7 @@ export function ReportViewer({ runId }: ReportViewerProps) {
         </h3>
       </div>
       <div className="px-6 py-5 prose prose-invert prose-sm prose-slate max-w-none overflow-y-auto max-h-[600px]">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
           {report || ""}
         </ReactMarkdown>
       </div>

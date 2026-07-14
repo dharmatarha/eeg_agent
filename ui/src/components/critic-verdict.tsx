@@ -9,6 +9,8 @@
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 
 interface CriticVerdictProps {
   approved: boolean;
@@ -49,7 +51,7 @@ export function CriticVerdict({ approved, feedback }: CriticVerdictProps) {
 
       {/* Feedback */}
       <div className="px-5 py-4 prose prose-invert prose-sm prose-slate max-w-none max-h-96 overflow-y-auto">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{feedback}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{feedback}</ReactMarkdown>
       </div>
     </div>
   );

@@ -11,6 +11,7 @@ import {
   ThreadPrimitive,
   MessagePrimitive,
   useAssistantToolUI,
+  useMessage,
 } from "@assistant-ui/react";
 import { PlanReviewCard } from "@/components/plan-review-card";
 import { CodeTrace } from "@/components/code-trace";
@@ -68,6 +69,20 @@ function ToolUIs() {
 // --- Message components ---
 
 function AssistantMessage() {
+  const message = useMessage();
+  const custom = message.metadata?.custom as Record<string, any> | undefined;
+  const isStatus = custom?.phase !== undefined;
+
+  if (isStatus) {
+    const textPart = message.content[0]?.type === "text" ? message.content[0].text : "";
+    return (
+      <div className="py-1 px-4 flex items-center gap-2 text-xs text-slate-400 font-mono">
+        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse shrink-0" />
+        <span>{textPart}</span>
+      </div>
+    );
+  }
+
   return (
     <MessagePrimitive.Root className="py-3 px-4">
       <div className="space-y-3 max-w-3xl">

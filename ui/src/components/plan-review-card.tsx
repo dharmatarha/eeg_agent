@@ -10,6 +10,8 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { useEegSession } from "@/providers/eeg-runtime";
 
 interface PlanReviewCardProps {
@@ -45,7 +47,7 @@ export function PlanReviewCard({ plan, requiresAction }: PlanReviewCardProps) {
 
       {/* Plan content */}
       <div className="px-5 py-4 max-h-96 overflow-y-auto prose prose-invert prose-sm prose-slate max-w-none">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{plan}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{plan}</ReactMarkdown>
       </div>
 
       {/* Actions */}
