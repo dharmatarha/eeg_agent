@@ -44,6 +44,7 @@ interface EegSessionContext {
   cancel: () => void;
   codeBlocks: EegMessage[];
   plots: EegMessage[];
+  messages: EegMessage[];
 }
 
 const SessionCtx = createContext<EegSessionContext>({
@@ -56,6 +57,7 @@ const SessionCtx = createContext<EegSessionContext>({
   cancel: () => {},
   codeBlocks: [],
   plots: [],
+  messages: [],
 });
 
 export const useEegSession = () => useContext(SessionCtx);
@@ -112,19 +114,27 @@ export function EegRuntimeProvider({ children }: { children: ReactNode }) {
           return next;
         }
       }
-      // 3. For plan_ready and hitl_required, deduplicate
+      // 3. For plan_ready and hitl_required, deduplicate if in the same planning turn
       if (msg.type === "plan_ready" || msg.type === "hitl_required") {
-        const existing = prev.findIndex(
-          (m) => m.type === "plan_ready" || m.type === "hitl_required"
-        );
-        if (existing !== -1) {
-          const next = [...prev];
-          next[existing] = {
-            ...next[existing],
-            type: msg.type,
-            content: msg.content,
-          };
-          return next;
+        let lastPlanIdx = -1;
+        for (let i = prev.length - 1; i >= 0; i--) {
+          if (prev[i].type === "plan_ready" || prev[i].type === "hitl_required") {
+            lastPlanIdx = i;
+            break;
+          }
+        }
+
+        if (lastPlanIdx !== -1) {
+          const hasUserMsgAfter = prev.slice(lastPlanIdx + 1).some((m) => m.role === "user");
+          if (!hasUserMsgAfter) {
+            const next = [...prev];
+            next[lastPlanIdx] = {
+              ...next[lastPlanIdx],
+              type: msg.type,
+              content: msg.content,
+            };
+            return next;
+          }
         }
       }
       // 4. For critic verdicts, deduplicate
@@ -468,6 +478,7 @@ export function EegRuntimeProvider({ children }: { children: ReactNode }) {
     cancel,
     codeBlocks,
     plots,
+    messages,
   };
 
   return (

@@ -25,6 +25,7 @@ function ToolUIs() {
     toolName: "plan_review",
     render: ({ args }) => (
       <PlanReviewCard
+        id={args.id as string}
         plan={args.plan as string}
         requiresAction={args.requiresAction as boolean}
       />

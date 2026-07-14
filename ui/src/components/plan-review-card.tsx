@@ -15,15 +15,21 @@ import rehypeKatex from "rehype-katex";
 import { useEegSession } from "@/providers/eeg-runtime";
 
 interface PlanReviewCardProps {
+  id: string;
   plan: string;
   requiresAction: boolean;
 }
 
-export function PlanReviewCard({ plan, requiresAction }: PlanReviewCardProps) {
-  const { approve, reject, phase } = useEegSession();
+export function PlanReviewCard({ id, plan, requiresAction }: PlanReviewCardProps) {
+  const { approve, reject, phase, messages } = useEegSession();
   const [editing, setEditing] = useState(false);
   const [feedback, setFeedback] = useState("");
-  const isWaiting = phase === "awaiting_hitl" && requiresAction;
+
+  const planMessages = messages.filter(
+    (m) => m.type === "plan_ready" || m.type === "hitl_required"
+  );
+  const isLatest = planMessages.length === 0 || planMessages[planMessages.length - 1].id === id;
+  const isWaiting = phase === "awaiting_hitl" && requiresAction && isLatest;
 
   return (
     <div className="rounded-xl border border-white/10 bg-slate-800/60 backdrop-blur overflow-hidden">
@@ -38,9 +44,19 @@ export function PlanReviewCard({ plan, requiresAction }: PlanReviewCardProps) {
             Awaiting Review
           </span>
         )}
-        {!isWaiting && phase !== "awaiting_hitl" && (
+        {!isWaiting && isLatest && phase !== "awaiting_hitl" && phase !== "failed" && (
           <span className="text-xs px-2 py-1 rounded-full bg-emerald-500/20 text-emerald-400 font-medium">
             ✅ Approved
+          </span>
+        )}
+        {!isLatest && (
+          <span className="text-xs px-2 py-1 rounded-full bg-slate-500/20 text-slate-400 font-medium">
+            🔄 Revised
+          </span>
+        )}
+        {phase === "failed" && isLatest && (
+          <span className="text-xs px-2 py-1 rounded-full bg-red-500/20 text-red-400 font-medium">
+            ❌ Rejected
           </span>
         )}
       </div>
