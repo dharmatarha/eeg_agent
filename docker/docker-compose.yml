@@ -18,6 +18,7 @@ services:
   # Vector Database for RAG (shifted to port 8001 on host to avoid port 8000 conflict with FastAPI)
   chromadb:
     image: chromadb/chroma:latest
+    user: "0:0"
     ports:
       - "8001:8000"
     volumes:
