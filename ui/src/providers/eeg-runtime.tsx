@@ -287,6 +287,7 @@ export function EegRuntimeProvider({ children }: { children: ReactNode }) {
         const initialMessages: EegMessage[] = [];
 
         // Always hydrate the user directive if available
+        // Always hydrate the user directive if available
         if (runState.state?.user_directive) {
           initialMessages.push({
             id: `msg-dir-${Date.now()}`,
@@ -297,36 +298,7 @@ export function EegRuntimeProvider({ children }: { children: ReactNode }) {
           });
         }
 
-        // Case A: Run is already completed
-        if (runState.phase === "completed") {
-          setMessages(initialMessages);
-          setPhase("completed");
-          setIsRunning(false);
-          setIsConnected(false);
-          return;
-        }
-
-        // Case B: Run is failed or was interrupted (backend crash / OOM)
-        if (runState.phase === "failed") {
-          const interruptMsg = runState.interrupted
-            ? "⚠️ This run was interrupted (the backend process was terminated, likely due to an out-of-memory condition). The run cannot be resumed from this point — please start a new analysis."
-            : "❌ This run failed.";
-          initialMessages.push({
-            id: `msg-fail-${Date.now()}`,
-            role: "assistant",
-            type: "error",
-            content: interruptMsg,
-            timestamp: now,
-          });
-          setMessages(initialMessages);
-          setPhase("failed");
-          setIsRunning(false);
-          setIsConnected(false);
-          return;
-        }
-
-        // Case C: Active run (Planning, executing, etc.) -> Hydrate history
-
+        // Hydrate all history fields from state if available
         if (runState.state?.analysis_plan) {
           const isApproved = runState.state.is_approved || false;
           initialMessages.push({
@@ -393,6 +365,35 @@ export function EegRuntimeProvider({ children }: { children: ReactNode }) {
           });
         }
 
+        // Case A: Run is already completed
+        if (runState.phase === "completed") {
+          setMessages(initialMessages);
+          setPhase("completed");
+          setIsRunning(false);
+          setIsConnected(false);
+          return;
+        }
+
+        // Case B: Run is failed or was interrupted (backend crash / OOM)
+        if (runState.phase === "failed") {
+          const interruptMsg = runState.interrupted
+            ? "⚠️ This run was interrupted (the backend process was terminated, likely due to an out-of-memory condition). The run cannot be resumed from this point — please start a new analysis."
+            : "❌ This run failed.";
+          initialMessages.push({
+            id: `msg-fail-${Date.now()}`,
+            role: "assistant",
+            type: "error",
+            content: interruptMsg,
+            timestamp: now,
+          });
+          setMessages(initialMessages);
+          setPhase("failed");
+          setIsRunning(false);
+          setIsConnected(false);
+          return;
+        }
+
+        // Case C: Active run (Planning, executing, etc.) -> Hydrate history and start WebSocket stream
         setMessages(initialMessages);
         setPhase(runState.phase as RunPhase);
         setIsRunning(true);
@@ -475,7 +476,9 @@ export function EegRuntimeProvider({ children }: { children: ReactNode }) {
   const codeBlocks = messages.filter((m) => m.type === "code_block");
   const plots = messages.filter((m) => m.type === "plot");
   const chatMessages = messages.filter(
-    (m) => m.type !== "code_block" && m.type !== "plot"
+    (m) => m.type !== "code_block" &&
+           m.type !== "plot" &&
+           !(m.type === "status" && (m.metadata?.phase === "executor" || m.metadata?.phase === "critic"))
   );
 
   // --- assistant-ui runtime ---

@@ -60,10 +60,22 @@ class AgentProgressCallbackHandler(BaseCallbackHandler):
         run_id: uuid.UUID,
         **kwargs: Any,
     ) -> None:
+        phase_str = "executor"
+        global active_run
+        if active_run and active_run["run_id"] == self.run_id:
+            phase = active_run["phase"]
+            phase_str = phase.value if hasattr(phase, "value") else str(phase)
+
+        message = "🤖 AI is generating thoughts and code..."
+        if phase_str == "planner":
+            message = "🤖 Planner is generating the analysis plan..."
+        elif phase_str == "critic":
+            message = "🤖 Critic is reviewing the analysis..."
+
         self._broadcast({
             "type": "status",
-            "phase": "executor",
-            "message": "🤖 AI is generating thoughts and code...",
+            "phase": phase_str,
+            "message": message,
         })
 
     def on_tool_start(
@@ -916,13 +928,69 @@ async def get_run_state(run_id: str):
     # Check completed runs
     memory_path = os.path.join(OUTPUT_DIR, run_id, "run_memory.json")
     if os.path.exists(memory_path):
+        import base64
         with open(memory_path, "r", encoding="utf-8") as f:
             memory = json.load(f)
+
+        # Hydrate state from checkpointer
+        state_values = {}
+        try:
+            graph_app = build_workflow()
+            config = {"configurable": {"thread_id": run_id}}
+            state = graph_app.get_state(config)
+            if state and state.values:
+                state_values = {
+                    k: v
+                    for k, v in state.values.items()
+                    if k not in ("reference_run",)
+                }
+        except Exception as e:
+            logger.error("Failed to retrieve completed run state from DB for run %s: %s", run_id, e)
+
+        # Fallback: reconstruct state from memory and files on disk if checkpointer is empty/fails
+        if not state_values:
+            plots = []
+            artifacts = memory.get("artifacts", {})
+            plot_paths = artifacts.get("plots", [])
+            for p in plot_paths:
+                full_p = os.path.join(PROJECT_ROOT, p)
+                if os.path.exists(full_p):
+                    try:
+                        with open(full_p, "rb") as f_img:
+                            plots.append(base64.b64encode(f_img.read()).decode("utf-8"))
+                    except Exception:
+                        pass
+
+            code_blocks = []
+            pipeline_path = os.path.join(OUTPUT_DIR, run_id, "analysis_pipeline.py")
+            if os.path.exists(pipeline_path):
+                try:
+                    with open(pipeline_path, "r", encoding="utf-8") as f_py:
+                        code_blocks.append({
+                            "code": f_py.read(),
+                            "logs": "Pipeline compiled successfully.",
+                            "error": False
+                        })
+                except Exception:
+                    pass
+
+            state_values = {
+                "user_directive": memory.get("user_directive", ""),
+                "data_path": memory.get("data_path", ""),
+                "raw_metadata": json.dumps(memory.get("raw_metadata", {})),
+                "analysis_plan": memory.get("analysis_plan", ""),
+                "is_approved": memory.get("is_approved", False),
+                "critic_feedback": memory.get("critic_feedback", ""),
+                "generated_plots": plots,
+                "executed_code_blocks": code_blocks,
+            }
+
         return JSONResponse(
             content={
                 "run_id": run_id,
                 "phase": RunPhase.COMPLETED,
                 "memory": memory,
+                "state": state_values
             }
         )
 

@@ -71,7 +71,7 @@ function ToolUIs() {
 
 function AssistantMessage() {
   const message = useMessage();
-  const custom = message.metadata?.custom as Record<string, any> | undefined;
+  const custom = message.metadata?.custom as Record<string, unknown> | undefined;
   const isStatus = custom?.phase !== undefined;
 
   if (isStatus) {

@@ -29,7 +29,7 @@ CRITICAL CONSTRAINTS:
 3. You operate within a Stateful Jupyter Sandbox. Data loaded in previous turns remains in memory. Do not reload data if it is already in memory.
 4. Use the `stateful_jupyter_exec` tool to run your code. 
 5. If an error occurs (the tool returns error=True), analyze the traceback and rewrite the logic autonomously.
-6. Generate visualizations as requested by the plan.
+6. Generate visualizations as requested by the plan. When generating plots, you MUST call `plt.show()` (or output the plot object as the last line in a cell) to trigger inline rendering, allowing the Jupyter Sandbox to capture and stream the plot to the UI (even if you also save the plot as a file on disk).
 
 API SYNTAX & ERROR RESOLUTION CONSTRAINTS:
 - You have access to the `scientific_rag` tool (queries the offline MNE-Python API documentation) and the `web_search` tool (queries the web using DuckDuckGo).

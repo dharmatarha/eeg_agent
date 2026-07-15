@@ -42,8 +42,12 @@ const phaseBadge: Record<string, { label: string; color: string }> = {
 function SessionContent() {
   const params = useParams();
   const runId = params.runId as string;
-  const { connect, phase, cancel, codeBlocks, plots } = useEegSession();
+  const { connect, phase, cancel, codeBlocks, plots, messages } = useEegSession();
   const [activeTab, setActiveTab] = useState<"chat" | "code" | "plots" | "report">("chat");
+
+  const lastStatusMessage = [...messages]
+    .reverse()
+    .find((m) => m.type === "status");
 
   // Connect on mount
   useEffect(() => {
@@ -54,6 +58,7 @@ function SessionContent() {
   }, [runId]);
 
   // Auto-switch tabs based on phase transitions
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (phase === "completed") {
       setActiveTab("report");
@@ -65,6 +70,7 @@ function SessionContent() {
       setActiveTab("chat");
     }
   }, [phase]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleCancel = useCallback(async () => {
     cancel();
@@ -238,6 +244,13 @@ function SessionContent() {
                   />
                 ))
               )}
+
+              {phase === "executor" && lastStatusMessage && (
+                <div className="flex items-center gap-3 p-4 rounded-xl border border-purple-500/20 bg-purple-500/5 text-purple-300 font-mono text-xs animate-pulse">
+                  <div className="w-2 h-2 rounded-full bg-purple-500 animate-ping shrink-0" />
+                  <span>{lastStatusMessage.content}</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -257,6 +270,13 @@ function SessionContent() {
                       index={plot.metadata?.index as number}
                     />
                   ))}
+                </div>
+              )}
+
+              {phase === "critic" && lastStatusMessage && (
+                <div className="mt-6 flex items-center gap-3 p-4 rounded-xl border border-cyan-500/20 bg-cyan-500/5 text-cyan-300 font-mono text-xs animate-pulse">
+                  <div className="w-2 h-2 rounded-full bg-cyan-500 animate-ping shrink-0" />
+                  <span>{lastStatusMessage.content}</span>
                 </div>
               )}
             </div>
