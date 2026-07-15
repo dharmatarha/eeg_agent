@@ -7,7 +7,7 @@
  * Thread with domain-specific components, and shows run status.
  */
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { EegRuntimeProvider, useEegSession } from "@/providers/eeg-runtime";
@@ -17,6 +17,7 @@ import { ReportViewer } from "@/components/report-viewer";
 import { cancelRun } from "@/lib/api";
 import { CodeTrace } from "@/components/code-trace";
 import { PlotGallery } from "@/components/plot-gallery";
+import { MessageSquare, Terminal, Image as ImageIcon, FileText, Lock } from "lucide-react";
 
 // Phase badge styling
 const phaseBadge: Record<string, { label: string; color: string }> = {
@@ -42,6 +43,7 @@ function SessionContent() {
   const params = useParams();
   const runId = params.runId as string;
   const { connect, phase, cancel, codeBlocks, plots } = useEegSession();
+  const [activeTab, setActiveTab] = useState<"chat" | "code" | "plots" | "report">("chat");
 
   // Connect on mount
   useEffect(() => {
@@ -50,6 +52,19 @@ function SessionContent() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId]);
+
+  // Auto-switch tabs based on phase transitions
+  useEffect(() => {
+    if (phase === "completed") {
+      setActiveTab("report");
+    } else if (phase === "executor") {
+      setActiveTab("code");
+    } else if (phase === "critic") {
+      setActiveTab("plots");
+    } else if (phase === "awaiting_hitl" || phase === "planner" || phase === "ingest") {
+      setActiveTab("chat");
+    }
+  }, [phase]);
 
   const handleCancel = useCallback(async () => {
     cancel();
@@ -81,9 +96,9 @@ function SessionContent() {
       </aside>
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col h-screen overflow-hidden bg-slate-950">
         {/* Header */}
-        <header className="border-b border-white/5 bg-slate-900/30 px-6 py-3 flex items-center gap-4">
+        <header className="border-b border-white/5 bg-slate-900/30 px-6 py-3 flex items-center gap-4 shrink-0">
           <div className="flex items-center gap-3 flex-1 min-w-0">
             <h1 className="text-sm font-semibold text-slate-300 truncate">
               <span className="text-slate-500">Run:</span>{" "}
@@ -107,88 +122,149 @@ function SessionContent() {
           )}
         </header>
 
-        {/* Dashboard Panels */}
-        <div className="flex-1 overflow-hidden">
-          {phase === "completed" ? (
-            <div className="p-6 overflow-y-auto h-full">
-              <ReportViewer runId={runId} />
+        {/* Tab Navigation */}
+        <div className="border-b border-white/5 bg-slate-900/10 px-6 py-2 flex items-center gap-2 shrink-0">
+          <nav className="flex space-x-1" aria-label="Tabs">
+            {/* Chat Tab */}
+            <button
+              onClick={() => setActiveTab("chat")}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider transition-all duration-200 border cursor-pointer ${
+                activeTab === "chat"
+                  ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-[0_0_12px_rgba(99,102,241,0.15)]"
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border-transparent"
+              }`}
+            >
+              <MessageSquare className="w-4 h-4" />
+              Chat & Planning
+              {phase === "awaiting_hitl" && (
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+              )}
+            </button>
+
+            {/* Code Execution Tab */}
+            <button
+              onClick={() => setActiveTab("code")}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider transition-all duration-200 border cursor-pointer ${
+                activeTab === "code"
+                  ? "bg-purple-500/10 text-purple-400 border-purple-500/20 shadow-[0_0_12px_rgba(168,85,247,0.15)]"
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border-transparent"
+              }`}
+            >
+              <Terminal className="w-4 h-4" />
+              Code Execution
+              {codeBlocks.length > 0 && (
+                <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-bold leading-none ${
+                  codeBlocks.some(b => b.metadata?.error)
+                    ? "bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse"
+                    : "bg-purple-500/20 text-purple-400 border border-purple-500/10"
+                }`}>
+                  {codeBlocks.length}
+                </span>
+              )}
+            </button>
+
+            {/* Generated Plots Tab */}
+            <button
+              onClick={() => setActiveTab("plots")}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider transition-all duration-200 border cursor-pointer ${
+                activeTab === "plots"
+                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-[0_0_12px_rgba(16,185,129,0.15)]"
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border-transparent"
+              }`}
+            >
+              <ImageIcon className="w-4 h-4" />
+              Generated Plots
+              {plots.length > 0 && (
+                <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/10 px-1.5 py-0.5 rounded font-mono font-bold leading-none">
+                  {plots.length}
+                </span>
+              )}
+            </button>
+
+            {/* Final Report Tab */}
+            <button
+              onClick={() => {
+                if (phase === "completed") {
+                  setActiveTab("report");
+                }
+              }}
+              disabled={phase !== "completed"}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider transition-all duration-200 border ${
+                phase !== "completed"
+                  ? "text-slate-600 cursor-not-allowed border-transparent opacity-50"
+                  : activeTab === "report"
+                    ? "bg-cyan-500/10 text-cyan-400 border-cyan-500/20 shadow-[0_0_12px_rgba(6,182,212,0.15)] cursor-pointer"
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border-transparent cursor-pointer"
+              }`}
+              title={phase !== "completed" ? "Available when the analysis finishes" : undefined}
+            >
+              {phase !== "completed" ? (
+                <Lock className="w-4 h-4 text-slate-600" />
+              ) : (
+                <FileText className="w-4 h-4" />
+              )}
+              Final Report
+            </button>
+          </nav>
+        </div>
+
+        {/* Tab Content */}
+        <div className="flex-1 overflow-hidden relative">
+          {activeTab === "chat" && (
+            <div className="h-full flex flex-col max-w-4xl mx-auto px-4 py-6">
+              <div className="flex-1 overflow-hidden rounded-xl border border-white/5 bg-slate-900/20 backdrop-blur-sm shadow-xl flex flex-col">
+                <EegThread />
+              </div>
             </div>
-          ) : (
-            <div className="flex flex-col lg:flex-row h-full divide-y lg:divide-y-0 lg:divide-x divide-white/5 overflow-hidden">
-              {/* Column 1: Planning & Chat */}
-              <div className="flex-1 lg:max-w-md xl:max-w-lg flex flex-col h-full bg-slate-950/20 overflow-hidden">
-                <div className="px-4 py-3 bg-slate-900/40 border-b border-white/5 flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
-                    Planning & Chat
-                  </span>
-                </div>
-                <div className="flex-1 overflow-hidden">
-                  <EegThread />
-                </div>
-              </div>
+          )}
 
-              {/* Column 2: Execution Logs */}
-              <div className="flex-1 flex flex-col h-full bg-slate-950/10 overflow-hidden">
-                <div className="px-4 py-3 bg-slate-900/40 border-b border-white/5 flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
-                    Execution Logs
-                  </span>
-                  <span className="text-[10px] bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded font-mono font-medium">
-                    {codeBlocks.length} Blocks
-                  </span>
+          {activeTab === "code" && (
+            <div className="h-full overflow-y-auto p-6 space-y-4 max-w-5xl mx-auto">
+              {codeBlocks.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-64 text-slate-500 text-sm space-y-3">
+                  <div className="h-8 w-8 rounded-full border border-dashed border-slate-600 animate-pulse flex items-center justify-center">
+                    <Terminal className="w-4 h-4 text-slate-500" />
+                  </div>
+                  <p>Waiting for code execution to start...</p>
                 </div>
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                  {codeBlocks.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full text-slate-500 text-sm space-y-2 py-12">
-                      <div className="h-6 w-6 rounded-full border border-dashed border-slate-600 animate-pulse" />
-                      <p>Waiting for code execution...</p>
-                    </div>
-                  ) : (
-                    codeBlocks.map((block) => (
-                      <CodeTrace
-                        key={block.id}
-                        code={block.metadata?.code as string}
-                        logs={block.metadata?.logs as string}
-                        error={block.metadata?.error as boolean}
-                        index={block.metadata?.index as number}
-                      />
-                    ))
-                  )}
-                </div>
-              </div>
+              ) : (
+                codeBlocks.map((block) => (
+                  <CodeTrace
+                    key={block.id}
+                    code={block.metadata?.code as string}
+                    logs={block.metadata?.logs as string}
+                    error={block.metadata?.error as boolean}
+                    index={block.metadata?.index as number}
+                  />
+                ))
+              )}
+            </div>
+          )}
 
-              {/* Column 3: Generated Plots */}
-              <div className="flex-1 lg:max-w-sm xl:max-w-md flex flex-col h-full bg-slate-950/20 overflow-hidden">
-                <div className="px-4 py-3 bg-slate-900/40 border-b border-white/5 flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                    Generated Plots
-                  </span>
-                  <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded font-mono font-medium">
-                    {plots.length} Figs
-                  </span>
+          {activeTab === "plots" && (
+            <div className="h-full overflow-y-auto p-6 max-w-7xl mx-auto">
+              {plots.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-64 text-slate-500 text-sm space-y-3">
+                  <span className="text-3xl">📊</span>
+                  <p>No plots generated yet...</p>
                 </div>
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                  {plots.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full text-slate-500 text-sm space-y-2 py-12">
-                      <span className="text-2xl">📊</span>
-                      <p>No plots generated yet...</p>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 gap-4">
-                      {plots.map((plot) => (
-                        <PlotGallery
-                          key={plot.id}
-                          base64={plot.metadata?.base64 as string}
-                          index={plot.metadata?.index as number}
-                        />
-                      ))}
-                    </div>
-                  )}
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {plots.map((plot) => (
+                    <PlotGallery
+                      key={plot.id}
+                      base64={plot.metadata?.base64 as string}
+                      index={plot.metadata?.index as number}
+                    />
+                  ))}
                 </div>
-              </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === "report" && (
+            <div className="h-full overflow-y-auto p-6 max-w-4xl mx-auto">
+              <ReportViewer runId={runId} />
             </div>
           )}
         </div>
